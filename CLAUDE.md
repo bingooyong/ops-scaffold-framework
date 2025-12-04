@@ -18,17 +18,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 技术栈
 
-| 组件 | 技术选型 |
-|------|----------|
-| 编程语言 | Go 1.21+ |
-| Manager 后端 | Gin 1.10.1 + GORM 1.31.0 |
-| Manager 前端 | React 18+ + MUI 5+ |
-| 数据库 | MySQL 8.0+ |
-| 缓存 | Redis |
-| 任务调度 | robfig/cron v3.0.1 |
-| 系统资源采集 | shirou/gopsutil |
-| 日志 | uber-go/zap |
-| 通信协议 | gRPC (Manager ↔ Daemon), HTTP/HTTPS (Manager/Daemon ↔ Agent) |
+| 组件 | 技术选型 | 实际版本 |
+|------|----------|----------|
+| 编程语言 | Go 1.21+ | Go 1.24.0 |
+| Manager 后端 | Gin + GORM | Gin 1.10.0 + GORM 1.25.5 |
+| Manager 前端 | React + Vite + MUI | React 18.2 + Vite 7.2 + MUI 7.3 |
+| 前端状态管理 | Zustand + React Query | Zustand 5.0 + React Query 5.90 |
+| 前端路由 | React Router | v7.10 |
+| HTTP 客户端 | Axios | v1.13 |
+| 数据库 | MySQL | MySQL 8.0+ |
+| JWT 认证 | golang-jwt | v5.2.0 |
+| 密码加密 | bcrypt | golang.org/x/crypto v0.43.0 |
+| 配置管理 | Viper | v1.18.2 |
+| 日志 | zap | go.uber.org/zap v1.26.0 |
+| gRPC | gRPC + Protobuf | grpc v1.77.0 + protobuf v1.36.10 |
+| 测试框架 | testify | v1.9.0 |
+| 系统资源采集 | gopsutil | shirou/gopsutil v3 |
+| 通信协议 | gRPC + HTTP | Manager ↔ Daemon (gRPC), API (HTTP/HTTPS) |
 
 ---
 
@@ -74,58 +80,116 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## 完成状态
+
+| 组件 | 状态 | 说明 |
+|------|------|------|
+| **Manager 后端** | ✅ 完成 | HTTP API + gRPC + 认证授权 + 数据库 + 自动化测试 |
+| **Daemon 守护进程** | ✅ 完成 | 资源采集 + Agent管理 + gRPC通信 + 心跳上报 |
+| **Web 前端** | ✅ 完成 | React + Vite + MUI + 认证 + Dashboard + 节点管理 |
+| **Agent 执行进程** | ⏳ 待开发 | 任务执行 + HTTP API + 插件系统 |
+
+**当前版本**: v0.3.0 (Manager + Daemon + Web 前端基础功能完成)
+
+---
+
 ## 项目目录结构
 
-### 预期目录结构
+### 实际目录结构
+
+项目采用**多模块独立管理**方式，Manager 和 Daemon 各有独立的 go.mod：
 
 ```
 ops-scaffold-framework/
-├── cmd/                      # 各组件入口
-│   ├── daemon/
-│   │   └── main.go
-│   ├── agent/
-│   │   └── main.go
-│   └── manager/
-│       └── main.go
-├── internal/                 # 内部代码(不对外暴露)
-│   ├── daemon/              # Daemon 模块
+├── manager/                  # Manager 模块(独立模块)
+│   ├── cmd/manager/
+│   │   └── main.go          # Manager 入口
+│   ├── internal/
+│   │   ├── handler/         # HTTP 处理器
+│   │   ├── service/         # 业务逻辑层
+│   │   ├── repository/      # 数据访问层
+│   │   ├── model/           # 数据模型
+│   │   ├── middleware/      # 中间件(JWT认证等)
+│   │   ├── grpc/           # gRPC 服务端
+│   │   ├── router/         # 路由配置
+│   │   └── database/       # 数据库初始化
+│   ├── pkg/
+│   │   ├── proto/          # Protobuf 定义和生成代码
+│   │   ├── response/       # 统一响应格式
+│   │   └── logger/         # 日志工具
+│   ├── configs/
+│   │   ├── manager.dev.yaml    # 开发环境配置
+│   │   └── manager.prod.yaml   # 生产环境配置
+│   ├── test/
+│   │   ├── integration/    # 集成测试
+│   │   │   ├── manager_integration_test.go  # 完整测试套件
+│   │   │   └── README.md   # 测试文档
+│   │   └── run_tests.sh    # 自动化测试脚本
+│   ├── bin/
+│   │   └── manager         # 编译后的二进制文件
+│   ├── go.mod              # Manager 独立依赖
+│   ├── go.sum
+│   ├── Makefile
+│   └── .golangci.yml       # Lint 配置
+│
+├── daemon/                   # Daemon 模块(独立模块)
+│   ├── cmd/daemon/
+│   │   └── main.go          # Daemon 入口
+│   ├── internal/
 │   │   ├── collector/       # 资源采集器
+│   │   │   ├── manager.go   # 采集器管理
+│   │   │   ├── cpu.go       # CPU 采集
+│   │   │   ├── memory.go    # 内存采集
+│   │   │   ├── disk.go      # 磁盘采集
+│   │   │   └── network.go   # 网络采集
 │   │   ├── agent/          # Agent 进程管理
-│   │   ├── updater/        # 版本更新
-│   │   └── comm/           # 通信层
-│   ├── agent/              # Agent 模块
-│   │   ├── server/         # HTTP 服务
-│   │   ├── executor/       # 任务执行器
-│   │   └── heartbeat/      # 心跳模块
-│   └── manager/            # Manager 模块
-│       ├── handler/        # HTTP 处理器
-│       ├── service/        # 业务逻辑
-│       ├── repository/     # 数据访问层
-│       ├── model/          # 数据模型
-│       ├── middleware/     # 中间件
-│       └── grpc/          # gRPC 服务
-├── pkg/                     # 可对外暴露的包
-│   ├── proto/              # Protobuf 定义
-│   ├── utils/              # 工具函数
-│   └── errors/             # 错误定义
-├── configs/                 # 配置文件
-│   ├── daemon.yaml
-│   ├── agent.yaml
-│   └── manager.yaml
-├── migrations/              # 数据库迁移脚本
-├── scripts/                 # 脚本文件
-│   ├── install.sh
-│   └── build.sh
-├── docs/                    # 文档
+│   │   │   ├── manager.go   # Agent 生命周期管理
+│   │   │   ├── health.go    # 健康检查
+│   │   │   └── heartbeat.go # 心跳监控
+│   │   ├── comm/           # 通信层
+│   │   │   └── grpc_client.go  # gRPC 客户端
+│   │   ├── daemon/         # Daemon 核心逻辑
+│   │   │   ├── daemon.go    # 主流程
+│   │   │   └── signal.go    # 信号处理
+│   │   ├── config/         # 配置管理
+│   │   │   └── config.go
+│   │   └── logger/         # 日志
+│   │       └── logger.go
+│   ├── pkg/
+│   │   ├── proto/          # Protobuf 定义和生成代码
+│   │   └── types/          # 公共类型定义
+│   ├── configs/
+│   │   └── daemon.yaml     # Daemon 配置
+│   ├── scripts/
+│   │   ├── install.sh      # 安装脚本
+│   │   └── systemd/
+│   │       └── daemon.service  # Systemd 服务文件
+│   ├── bin/
+│   │   └── daemon          # 编译后的二进制文件
+│   ├── go.mod              # Daemon 独立依赖
+│   ├── go.sum
+│   ├── Makefile
+│   └── .golangci.yml
+│
+├── docs/                    # 项目文档
+│   ├── api/                # API 文档
+│   │   ├── README.md       # API 文档索引
+│   │   └── Manager_API.md  # Manager API 完整文档
 │   ├── 运维工具框架需求文档.md
 │   ├── 设计文档_01_Daemon模块.md
 │   ├── 设计文档_02_Agent模块.md
-│   └── 设计文档_03_Manager后端模块.md
-├── go.mod
-├── go.sum
-├── Makefile
+│   ├── 设计文档_03_Manager后端模块.md
+│   └── 代码生成计划.md
+│
+├── .gitignore
 └── README.md
 ```
+
+### 模块说明
+
+1. **Manager 模块**: 独立 Go 模块，module 名称 `github.com/bingooyong/ops-scaffold-framework/manager`
+2. **Daemon 模块**: 独立 Go 模块，module 名称 `github.com/bingooyong/ops-scaffold-framework/daemon`
+3. **根目录**: 不包含 go.mod，仅作为项目容器
 
 ---
 
@@ -194,33 +258,43 @@ ops-scaffold-framework/
 
 ### 构建命令
 
+由于项目采用多模块结构，需要分别构建各组件：
+
 ```bash
-# 构建所有组件
+# 构建 Manager
+cd manager
 make build
+# 输出: manager/bin/manager
 
-# 构建特定组件
-make build-daemon
-make build-agent
-make build-manager
+# 构建 Daemon
+cd daemon
+make build
+# 输出: daemon/bin/daemon
 
-# 运行测试
-make test
+# 或使用 go build 直接构建
+cd manager
+go build -o bin/manager ./cmd/manager/
 
-# 代码检查
-make lint
+cd daemon
+go build -o bin/daemon ./cmd/daemon/
 ```
 
 ### 运行组件
 
 ```bash
-# 启动 Daemon
-./bin/daemon -config configs/daemon.yaml
+# 启动 Manager (开发环境)
+cd manager
+./bin/manager -config configs/manager.dev.yaml
+# HTTP API: http://127.0.0.1:8080
+# gRPC: 127.0.0.1:9090
 
-# 启动 Agent
-./bin/agent -config configs/agent.yaml
+# 启动 Daemon (开发环境)
+cd daemon
+./bin/daemon -config configs/daemon.dev.yaml
 
-# 启动 Manager
-./bin/manager -config configs/manager.yaml
+# 查看帮助
+./bin/manager -h
+./bin/daemon -h
 ```
 
 ### 数据库迁移
@@ -254,16 +328,48 @@ mysql -u root -p < init.sql
 
 ## 测试要求
 
-### 单元测试
+### Manager 集成测试 ✅
+
+Manager 已实现完整的自动化集成测试套件，基于 Go testify/suite 框架。
+
+**测试覆盖**:
+- Phase 0: 健康检查
+- Phase 1: 认证模块 (注册、登录、获取资料、修改密码)
+- Phase 2: 节点管理 (列表、统计)
+- Phase 3: 错误场景 (无效凭证、无Token、重复注册)
+
+**运行测试**:
+```bash
+# 方式1: 使用自动化脚本(推荐)
+cd manager
+./test/run_tests.sh
+
+# 方式2: 直接运行 Go 测试
+cd manager
+go test -v ./test/integration/
+
+# 方式3: 运行特定测试阶段
+go test -v ./test/integration/ -run "Phase1"
+```
+
+**测试文档**: `manager/test/integration/README.md`
+
+### 测试覆盖率目标
 
 - Service 层: > 80% 覆盖率
 - Repository 层: > 70% 覆盖率
-- 执行器模块: > 80% 覆盖率
+- Handler 层: > 70% 覆盖率
+- 执行器模块(Agent): > 80% 覆盖率
 
 ### 测试命令
 
 ```bash
-# 运行所有测试
+# Manager 集成测试
+cd manager
+go test -v ./test/integration/
+
+# Daemon 单元测试(待补充)
+cd daemon
 go test ./...
 
 # 测试覆盖率
@@ -273,6 +379,14 @@ go test -cover ./...
 go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 ```
+
+### 测试原则
+
+1. **自动化优先**: 所有测试必须可自动化执行，避免手动测试
+2. **可重复性**: 测试脚本必须可重复运行，每次结果一致
+3. **测试隔离**: 测试之间互不影响，可独立执行
+4. **文档同步**: 测试代码与 API 文档保持严格一致
+5. **CI/CD 就绪**: 测试脚本可直接集成到 CI/CD 流程
 
 ---
 
@@ -381,11 +495,78 @@ Handler Layer → Service Layer → Repository Layer → Model Layer
 
 ---
 
+## 文档组织规范
+
+项目文档统一存放在 `docs/` 目录，采用以下结构：
+
+```
+docs/
+├── api/                          # API 文档目录
+│   ├── README.md                 # API 文档索引
+│   ├── Manager_API.md            # Manager API 完整文档 ✅
+│   ├── Daemon_gRPC_API.md        # Daemon gRPC API (待补充)
+│   └── Agent_HTTP_API.md         # Agent HTTP API (待补充)
+├── 运维工具框架需求文档.md       # 完整需求规格
+├── 设计文档_01_Daemon模块.md     # Daemon 详细设计
+├── 设计文档_02_Agent模块.md      # Agent 详细设计
+├── 设计文档_03_Manager后端模块.md # Manager 后端详细设计
+└── 代码生成计划.md               # 开发计划
+```
+
+### 文档规范
+
+1. **API 文档**:
+   - 位置: `docs/api/` 目录
+   - 格式: Markdown
+   - 内容: 完整的接口定义、请求/响应示例、错误码说明
+   - 更新: 代码修改后必须同步更新文档
+
+2. **测试文档**:
+   - 位置: 各模块的 `test/` 目录
+   - 示例: `manager/test/integration/README.md`
+   - 内容: 测试用例、运行方法、环境要求
+
+3. **配置文档**:
+   - 位置: 各模块的 `configs/` 目录
+   - 格式: YAML + 注释说明
+   - 示例: `manager/configs/manager.dev.yaml`
+
+### 文档一致性要求
+
+**关键原则**: 文档与代码必须保持严格一致
+
+- API 文档的 HTTP 状态码必须与代码一致
+- 响应格式必须与 `pkg/response/response.go` 一致
+- 错误码必须与代码中的定义一致
+- 所有 curl 示例必须可直接运行
+
+**验证方法**: 所有 API 文档的一致性必须通过自动化集成测试验证
+
+```bash
+cd manager
+go test -v ./test/integration/
+```
+
+### 已完成文档
+
+- ✅ Manager API 文档: `docs/api/Manager_API.md` (12个HTTP接口 + 3个gRPC接口)
+  - ✅ 已通过 11 个集成测试用例验证文档一致性
+  - ✅ 错误码: 0, 1001-1009, 2001-2009, 2003-2004, 2101-2102, 5001-5002
+  - ✅ HTTP 状态码: 200, 201, 400, 401, 403, 404, 409, 500
+- ✅ Manager 测试文档: `manager/test/integration/README.md`
+- ✅ API 文档索引: `docs/api/README.md`
+- ⏳ Daemon API 文档: 待补充
+- ⏳ Agent API 文档: 待补充
+
+---
+
 ## 参考文档
 
 详细设计文档位于 `docs/` 目录:
 
-- `运维工具框架需求文档.md`: 完整需求规格
-- `设计文档_01_Daemon模块.md`: Daemon 详细设计
-- `设计文档_02_Agent模块.md`: Agent 详细设计
-- `设计文档_03_Manager后端模块.md`: Manager 后端详细设计
+- **需求文档**: `docs/运维工具框架需求文档.md` - 完整需求规格
+- **设计文档**:
+  - `docs/设计文档_01_Daemon模块.md` - Daemon 详细设计
+  - `docs/设计文档_02_Agent模块.md` - Agent 详细设计
+  - `docs/设计文档_03_Manager后端模块.md` - Manager 后端详细设计
+- **API 文档**: `docs/api/README.md` - API 文档索引入口

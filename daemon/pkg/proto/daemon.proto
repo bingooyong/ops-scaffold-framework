@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/bingooyong/ops-scaffold-framework/daemon/pkg/proto";
+
+// DaemonService Daemon服务定义
+service DaemonService {
+  // Register 节点注册
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Heartbeat 心跳上报
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // ReportMetrics 指标上报
+  rpc ReportMetrics(MetricsRequest) returns (MetricsResponse);
+
+  // GetConfig 获取配置
+  rpc GetConfig(ConfigRequest) returns (ConfigResponse);
+
+  // PushUpdate 推送更新
+  rpc PushUpdate(UpdateRequest) returns (UpdateResponse);
+}
+
+// RegisterRequest 注册请求
+message RegisterRequest {
+  string hostname = 1;
+  string ip = 2;
+  string os = 3;
+  string arch = 4;
+  map<string, string> labels = 5;
+  string daemon_version = 6;
+  string agent_version = 7;
+}
+
+// RegisterResponse 注册响应
+message RegisterResponse {
+  string node_id = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+// HeartbeatRequest 心跳请求
+message HeartbeatRequest {
+  string node_id = 1;
+  int64 timestamp = 2;
+  string status = 3;
+}
+
+// HeartbeatResponse 心跳响应
+message HeartbeatResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// MetricsRequest 指标上报请求
+message MetricsRequest {
+  string node_id = 1;
+  int64 timestamp = 2;
+  bytes data = 3; // JSON格式的指标数据
+}
+
+// MetricsResponse 指标上报响应
+message MetricsResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ConfigRequest 配置请求
+message ConfigRequest {
+  string node_id = 1;
+}
+
+// ConfigResponse 配置响应
+message ConfigResponse {
+  bytes config = 1; // JSON格式的配置数据
+}
+
+// UpdateRequest 更新请求
+message UpdateRequest {
+  string node_id = 1;
+  string component = 2; // "agent" or "daemon"
+  string version = 3;
+  string download_url = 4;
+  string hash = 5;
+  string signature = 6;
+}
+
+// UpdateResponse 更新响应
+message UpdateResponse {
+  bool success = 1;
+  string message = 2;
+}

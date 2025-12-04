@@ -1,0 +1,196 @@
+---
+globs: *.ts,*.tsx,*.js,*.jsx
+description: React frontend coding standards and conventions for the web module
+---
+# React Frontend Coding Standards
+
+## Technology Stack
+
+- **Framework**: React 18.2+ with TypeScript 5.0+
+- **Build Tool**: Vite 7.2+
+- **UI Library**: Material-UI (MUI) 7.3+
+- **State Management**: Zustand 5.0 (client state) + React Query 5.90 (server state)
+- **Routing**: React Router v7.10
+- **HTTP Client**: Axios v1.13
+- **Charts**: Apache ECharts 5.4+ (via echarts-for-react)
+
+## Project Structure
+
+```
+web/src/
+├── api/              # API layer (Axios client, interceptors, API functions)
+├── components/       # Reusable components
+│   ├── Layout/      # Layout components (MainLayout, Sidebar, Header)
+│   ├── Charts/      # Chart components
+│   ├── Table/       # Table components
+│   └── Common/      # Common UI components
+├── pages/           # Page components (Dashboard, Nodes, Tasks, etc.)
+├── hooks/           # Custom React hooks
+├── stores/          # Zustand stores (auth, user, config)
+├── types/           # TypeScript type definitions
+├── utils/           # Utility functions
+├── theme/           # MUI theme configuration
+└── router/          # Route configuration
+```
+
+## Coding Standards
+
+### Component Definition
+
+```typescript
+// Use function components with TypeScript
+interface ComponentProps {
+  title: string;
+  onSubmit: (data: FormData) => void;
+}
+
+export default function ComponentName({ title, onSubmit }: ComponentProps) {
+  // 1. Hooks
+  const [state, setState] = useState('');
+  
+  // 2. Effects
+  useEffect(() => {
+    // ...
+  }, []);
+  
+  // 3. Event handlers
+  const handleClick = () => {
+    // ...
+  };
+  
+  // 4. Render
+  return (
+    <Box>
+      <Typography variant="h5">{title}</Typography>
+    </Box>
+  );
+}
+```
+
+### Import Order
+
+1. React core
+2. Third-party UI libraries (MUI)
+3. Third-party utilities
+4. Local hooks
+5. Local components
+6. Type definitions
+7. Styles
+
+### State Management
+
+- **Component state**: `useState` for local UI state
+- **Client state**: Zustand for auth, user preferences, UI state
+- **Server state**: React Query for API data, caching, refetching
+
+### API Integration
+
+- Use React Query hooks in `hooks/` directory
+- API functions in `api/` directory
+- Always use TypeScript types from `types/`
+- Handle errors with toast notifications
+
+### Styling
+
+- **Primary**: MUI `sx` prop (recommended)
+- **Complex styles**: MUI `styled` API
+- **Spacing**: Use MUI 8px base system (p: 2 = 16px)
+- **Colors**: Always from theme, never hardcode
+- **Responsive**: Use MUI breakpoints (xs, sm, md, lg, xl)
+
+### TypeScript
+
+- **Strict mode**: Enabled in `tsconfig.json`
+- **No `any`**: Use specific types or `unknown`
+- **Type imports**: Use `import type` for type-only imports
+- **Interfaces**: Use for object types
+- **Enums**: Use for constants
+- **Types**: Use for unions/intersections
+
+### File Naming
+
+- Components: `PascalCase.tsx` (e.g., `UserCard.tsx`)
+- Hooks: `camelCase.ts` with `use` prefix (e.g., `useAuth.ts`)
+- Utils: `camelCase.ts` (e.g., `formatDate.ts`)
+- Types: `camelCase.ts` (e.g., `user.ts`)
+
+## Component Patterns
+
+### Page Component Structure
+
+```typescript
+<Box sx={{ p: 3 }}>
+  <Typography variant="h4" gutterBottom>
+    Page Title
+  </Typography>
+  
+  <Box sx={{ mt: 3 }}>
+    {/* Page content */}
+  </Box>
+</Box>
+```
+
+### Form Handling
+
+- Use `react-hook-form` for form management
+- Use MUI `TextField`, `Select`, etc. with `{...register('fieldName')}`
+- Validation with `yup` or built-in validation
+
+### Data Fetching
+
+```typescript
+// Use React Query hooks
+const { data, isLoading, error } = useQuery({
+  queryKey: ['nodes', filters],
+  queryFn: () => nodesAPI.list(filters),
+  staleTime: 30000,
+  refetchInterval: 60000, // Auto-refresh
+});
+```
+
+### Error Handling
+
+- Use toast notifications for user feedback
+- Show loading states with `CircularProgress`
+- Use `ErrorBoundary` for error boundaries
+- Handle API errors in interceptors
+
+## Routing
+
+- Routes defined in `router/routes.tsx`
+- Protected routes use `ProtectedRoute` component
+- Route paths:
+  - `/` → Dashboard
+  - `/login` → Login (public)
+  - `/nodes` → Node list
+  - `/nodes/:id` → Node detail
+  - `/tasks` → Task list
+
+## Authentication
+
+- JWT token stored in Zustand store with persistence
+- Token in Authorization header: `Bearer ${token}`
+- Auto-refresh on 401 errors
+- Redirect to `/login` if unauthenticated
+
+## Performance
+
+- Code splitting with React.lazy()
+- Memoization: `React.memo`, `useMemo`, `useCallback`
+- Virtual scrolling for long lists
+- Image optimization (WebP, lazy loading)
+
+## Testing
+
+- Unit tests: Vitest + React Testing Library
+- Component tests: Test rendering and interactions
+- Coverage targets:
+  - Utils: > 90%
+  - Hooks: > 80%
+  - Components: > 70%
+  - Pages: > 60%
+
+## References
+
+- Frontend standards: [docs/前端开发规范.md](mdc:docs/前端开发规范.md)
+- Design document: [docs/设计文档_04_Web前端模块.md](mdc:docs/设计文档_04_Web前端模块.md)

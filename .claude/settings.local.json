@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(./bin/daemon:*)",
+      "Bash(make build:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go tool cover:*)",
+      "Bash(pkill:*)",
+      "Bash(go mod init:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(protoc:*)",
+      "Bash(go get:*)",
+      "Bash(mysql:*)",
+      "Bash(/Users/bingooyong/Code/01Code/github.com/bingooyong/ops-scaffold-framework/manager/bin/manager:*)",
+      "Bash(curl:*)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwicm9sZSI6InVzZXIiLCJpc3MiOiJvcHMtbWFuYWdlci1kZXYiLCJleHAiOjE3NjQ4MzMzMTEsIm5iZiI6MTc2NDc0NjkxMSwiaWF0IjoxNzY0NzQ2OTExfQ.4T8VkDnUB04DT_AyO0xjRvnzBN1hZ8Mp3Z3nBSC3McE\" curl -s -X GET http://127.0.0.1:8080/api/v1/auth/profile -H \"Authorization: Bearer $TOKEN\")",
+      "Read(//private/tmp/**)",
+      "Bash(go version:*)",
+      "Bash(/Users/bingooyong/Code/01Code/github.com/bingooyong/ops-scaffold-framework/manager/test/run_tests.sh)",
+      "Bash(cat:*)",
+      "Bash(tree:*)",
+      "Bash(export GOWORK=off)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwicm9sZSI6InVzZXIiLCJpc3MiOiJvcHMtbWFuYWdlci1kZXYiLCJleHAiOjE3NjQ4MzMzMTEsIm5iZiI6MTc2NDc0NjkxMSwiaWF0IjoxNzY0NzQ2OTExfQ.4T8VkDnUB04DT_AyO0xjRvnzBN1hZ8Mp3Z3nBSC3McE\")",
+      "Bash(npm create:*)",
+      "Bash(npm install)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

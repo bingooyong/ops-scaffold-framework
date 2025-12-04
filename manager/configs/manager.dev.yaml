@@ -1,0 +1,51 @@
+# Manager配置文件（开发环境）
+
+# HTTP服务配置
+server:
+  host: 127.0.0.1
+  port: 8080
+  mode: debug  # debug模式,显示详细日志
+  read_timeout: 30s
+  write_timeout: 30s
+
+# 数据库配置
+database:
+  driver: mysql
+  dsn: "root:rootpassword@tcp(127.0.0.1:3306)/ops_manager_dev?charset=utf8mb4&parseTime=True&loc=Local"
+  max_idle_conns: 5
+  max_open_conns: 20
+  conn_max_lifetime: 30m
+  log_level: info  # 开发环境显示SQL日志
+
+# Redis配置
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 5
+
+# gRPC服务配置
+grpc:
+  host: 127.0.0.1
+  port: 9090
+  tls:
+    enabled: false  # 开发环境关闭TLS
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+
+# JWT配置
+jwt:
+  secret: "dev-secret-key-do-not-use-in-production"
+  expire_time: 24h
+  issuer: "ops-manager-dev"
+
+# 日志配置
+log:
+  level: debug  # 开发环境使用debug级别
+  output_path: ./logs/manager.log
+  max_size: 50
+  max_backups: 3
+  max_age: 7
+  compress: false

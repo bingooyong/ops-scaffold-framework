@@ -1,0 +1,52 @@
+[Unit]
+Description=Ops Scaffold Framework - Daemon Service
+Documentation=https://github.com/bingooyong/ops-scaffold-framework
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# 二进制文件路径
+ExecStart=/usr/local/bin/daemon -config /etc/daemon/daemon.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+
+# 重启策略
+Restart=on-failure
+RestartSec=10s
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# 工作目录
+WorkingDirectory=/var/lib/daemon
+
+# 环境变量
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# 进程管理
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=daemon
+
+# 安全设置（基础加固）
+NoNewPrivileges=true
+PrivateTmp=true
+
+# 额外安全选项（可根据需要启用）
+# ProtectSystem=strict
+# ProtectHome=true
+# ReadWritePaths=/var/lib/daemon /var/log/daemon /etc/daemon
+
+[Install]
+WantedBy=multi-user.target

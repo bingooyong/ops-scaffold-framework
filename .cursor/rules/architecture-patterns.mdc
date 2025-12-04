@@ -1,0 +1,204 @@
+---
+description: Architecture patterns, design principles, and system design guidelines
+---
+# Architecture Patterns and Design Principles
+
+## System Architecture
+
+### Three-Tier Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│   Presentation Layer (React + MUI Frontend)     │
+└──────────────────────┬──────────────────────────┘
+                       │ HTTP/HTTPS (REST API)
+┌──────────────────────▼──────────────────────────┐
+│   Application Layer (Manager - Go + Gin + GORM) │
+└──────────────────────┬──────────────────────────┘
+                       │ gRPC/HTTPS
+┌──────────────────────▼──────────────────────────┐
+│   Host Layer (Daemon + Agent on each host)       │
+└──────────────────────────────────────────────────┘
+```
+
+## Component Responsibilities
+
+### Manager (Center Management Node)
+
+**Responsibilities**:
+- Node registration and management
+- Resource monitoring aggregation
+- Version release and update management
+- Task scheduling and distribution
+- User authentication and authorization
+- Audit logging
+
+**Key Design Points**:
+- Layered architecture: Handler → Service → Repository → Model
+- RESTful API for frontend
+- gRPC server for Daemon communication
+- Database: MySQL for persistent data
+- JWT authentication for HTTP API
+- mTLS for gRPC communication
+
+### Daemon (Guardian Process)
+
+**Responsibilities**:
+- System resource collection (CPU, memory, disk, network)
+- Agent process lifecycle management
+- Version update execution
+- Status reporting to Manager
+- Local log management
+
+**Key Design Points**:
+- Modular architecture (Collector, AgentMgr, Updater, Communication)
+- Independent process (not Manager subprocess)
+- Agent runs as independent process (not Daemon subprocess)
+- Resource collection interval: 60s (configurable 10-300s)
+- Agent health check: 30s interval
+- Graceful shutdown (does not stop Agent)
+
+### Agent (Execution Process)
+
+**Responsibilities**:
+- Task execution (scripts, files, services)
+- HTTP/HTTPS API service
+- Heartbeat reporting to Daemon
+- Task queue and concurrency control
+
+**Key Design Points**:
+- Independent process (not Daemon subprocess)
+- HTTP API with request signature authentication
+- Worker pool for concurrent task execution
+- Plugin system support (Go plugins)
+
+## Communication Protocols
+
+### Manager ↔ Daemon
+
+- **Protocol**: gRPC over TLS
+- **Authentication**: mTLS bidirectional certificate authentication
+- **Port**: 9090
+- **Key Interfaces**:
+  - `Register()` - Node registration
+  - `Heartbeat()` - Heartbeat reporting
+  - `ReportMetrics()` - Metrics reporting
+  - `PushUpdate()` - Version update push
+
+### Manager/Daemon ↔ Agent
+
+- **Protocol**: HTTP/HTTPS RESTful API
+- **Authentication**: HMAC-SHA256 request signature + IP whitelist
+- **Key Endpoints**:
+  - `GET /api/v1/health` - Health check
+  - `POST /api/v1/task/execute` - Execute task
+  - `GET /api/v1/task/{id}/status` - Task status
+
+### Daemon ↔ Agent (Local)
+
+- **Protocol**: Unix Domain Socket (Linux) / Named Pipe (Windows)
+- **Format**: JSON-RPC 2.0
+- **Messages**: heartbeat, stop, status
+
+## Security Design
+
+### Communication Security
+
+- **Manager ↔ Daemon**: TLS 1.3 + mTLS bidirectional authentication
+- **Agent API**: HMAC-SHA256 request signature + IP whitelist
+- All sensitive communications use encryption
+
+### Version Update Security
+
+Update packages must pass:
+1. **Source verification**: Manager IP whitelist or certificate verification
+2. **Signature verification**: RSA-2048 or ECDSA signature
+3. **Integrity check**: SHA-256 hash verification
+4. **Version check**: New version number > current version
+
+### Sensitive Data Protection
+
+- Sensitive information in configs: encrypted storage
+- Log sanitization
+- Memory key material: cleared after use
+
+## Process Isolation
+
+### Critical Principle
+
+**Agent must run as independent process, not as Daemon subprocess**
+
+- Daemon exit does not affect Agent
+- Agent exceptions trigger Daemon auto-restart
+- Supports backoff strategy for restarts
+
+### Restart Strategy
+
+| Restart Count | Wait Time | Notes |
+|---------------|-----------|-------|
+| 1st time      | Immediate | - |
+| 2nd-3rd       | 10s       | - |
+| 4th-5th       | 30s       | - |
+| > 5 times     | 60s       | Report alert |
+
+## Version Update Flow
+
+```
+Receive Update Command → Download Package → Verify Signature → 
+Verify Hash → Backup Current Version → Stop Service → 
+Replace Files → Start New Version → Health Check (30s) → 
+Success: Clean Backup / Failure: Rollback
+```
+
+## Performance Requirements
+
+### Resource Usage
+
+- **Daemon**: CPU < 1% (idle), Memory < 30MB
+- **Agent**: CPU < 1% (idle), Memory < 50MB
+- **Manager API**: Response < 200ms (P95)
+
+### Capacity
+
+- Single Manager supports 1000+ nodes
+- Agent supports 10 concurrent tasks
+- Task response latency < 100ms
+
+## Error Handling
+
+### Error Code Convention
+
+- `0`: Success
+- `1xxx`: Client errors (parameters, authentication, permissions)
+- `2xxx`: Business errors (nodes, tasks)
+- `3xxx`: Version management errors
+- `5xxx`: Server internal errors
+
+### Retry Strategy
+
+- Use exponential backoff for transient errors
+- Max retries: 3-5 times
+- Timeout: 30s for most operations
+
+## Testing Strategy
+
+### Test Levels
+
+1. **Unit Tests**: > 70% coverage
+2. **Integration Tests**: API endpoint testing
+3. **Performance Tests**: Load testing for 1000+ nodes
+4. **Security Tests**: Code scanning, dependency scanning
+5. **Chaos Tests**: Simulate node failures, network partitions
+
+### Test Principles
+
+1. **Automation First**: All tests must be automatable
+2. **Repeatability**: Tests must be repeatable with consistent results
+3. **Test Isolation**: Tests should not affect each other
+4. **Documentation Sync**: Test code must match API documentation
+
+## References
+
+- Main documentation: [CLAUDE.md](mdc:CLAUDE.md)
+- Requirements: [docs/运维工具框架需求文档.md](mdc:docs/运维工具框架需求文档.md)
+- Design documents: `docs/设计文档_*.md`

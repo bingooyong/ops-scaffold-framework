@@ -1,0 +1,214 @@
+---
+description: API design standards, response formats, and error handling conventions
+---
+# API Design Standards
+
+## Response Format
+
+All HTTP API responses must follow the unified format defined in `manager/pkg/response/response.go`:
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {},
+  "timestamp": "2025-12-01T10:00:00Z"
+}
+```
+
+### Response Fields
+
+- **code**: Integer error code (0 = success, non-zero = error)
+- **message**: Human-readable message
+- **data**: Response payload (can be object, array, or null)
+- **timestamp**: ISO 8601 timestamp
+
+## Error Code Convention
+
+### Success
+- `0`: Success
+
+### Client Errors (1xxx)
+- `1001`: Parameter error
+- `1002`: Authentication failed
+- `1003`: Insufficient permissions
+- `1004`: Resource not found
+- `1005`: Request rate limit exceeded
+- `1006`: Request expired (timestamp check)
+- `1007`: Invalid signature
+- `1008`: IP not allowed
+- `1009`: Duplicate resource
+
+### Business Errors (2xxx)
+- `2001`: Node does not exist
+- `2002`: Node already exists
+- `2003`: Node offline
+- `2004`: Node registration failed
+- `2101`: Agent not running
+- `2102`: Agent health check failed
+
+### Version Management Errors (3xxx)
+- `3001`: Version does not exist
+- `3002`: Version already exists
+- `3003`: Signature verification failed
+- `3004`: Hash verification failed
+- `3005`: Update failed
+- `3006`: Rollback failed
+
+### Server Errors (5xxx)
+- `5001`: Database error
+- `5002`: Cache error
+- `5003`: Internal server error
+
+## HTTP Status Codes
+
+| Status Code | Usage | Example |
+|------------|-------|---------|
+| 200 | Success | GET, PUT, DELETE success |
+| 201 | Created | POST create success |
+| 400 | Bad Request | Invalid parameters |
+| 401 | Unauthorized | Authentication failed |
+| 403 | Forbidden | Insufficient permissions |
+| 404 | Not Found | Resource not found |
+| 409 | Conflict | Duplicate resource |
+| 429 | Too Many Requests | Rate limit exceeded |
+| 500 | Internal Server Error | Server error |
+
+## Authentication
+
+### HTTP API (Manager)
+
+- **Method**: JWT Bearer Token
+- **Header**: `Authorization: Bearer <token>`
+- **Token TTL**: 2 hours (access token), 7 days (refresh token)
+- **Refresh**: Use refresh token to get new access token
+
+### Agent API
+
+- **Method**: HMAC-SHA256 Request Signature
+- **Headers**:
+  - `X-Timestamp`: Unix timestamp (seconds)
+  - `X-Nonce`: Random string (prevents replay)
+  - `X-Signature`: Base64(HMAC-SHA256(StringToSign, SecretKey))
+- **StringToSign**: `Method + "\n" + Path + "\n" + Timestamp + "\n" + Nonce + "\n" + Body`
+- **Validation**: Timestamp within 5 minutes, Nonce not reused (1 hour cache)
+
+### gRPC (Manager ↔ Daemon)
+
+- **Method**: mTLS bidirectional certificate authentication
+- **TLS Version**: TLS 1.3
+- **Certificates**: Client cert, server cert, CA cert
+
+## API Endpoints
+
+### Manager HTTP API
+
+Base URL: `http://localhost:8080/api/v1`
+
+**Authentication**:
+- `POST /auth/register` - User registration
+- `POST /auth/login` - User login
+- `POST /auth/refresh` - Refresh token
+- `GET /auth/profile` - Get user profile
+
+**Nodes**:
+- `GET /nodes` - List nodes (with pagination, filtering)
+- `GET /nodes/:id` - Get node details
+- `PUT /nodes/:id` - Update node
+- `DELETE /nodes/:id` - Delete node
+- `GET /nodes/:id/metrics` - Get node metrics
+- `GET /nodes/statistics` - Get node statistics
+
+**Versions**:
+- `GET /versions` - List versions
+- `POST /versions` - Upload version
+- `POST /updates/deploy` - Deploy update
+- `GET /updates/:batchId/status` - Get update status
+
+**Tasks**:
+- `GET /tasks` - List tasks
+- `POST /tasks` - Create task
+- `POST /tasks/:id/execute` - Execute task
+- `GET /tasks/:id/executions` - Get execution history
+
+### Manager gRPC API
+
+Service: `ops.daemon.DaemonService`
+
+**Methods**:
+- `Register(RegisterRequest) returns (RegisterResponse)`
+- `Heartbeat(HeartbeatRequest) returns (HeartbeatResponse)`
+- `ReportMetrics(ReportMetricsRequest) returns (ReportMetricsResponse)`
+
+### Agent HTTP API
+
+Base URL: `http://localhost:8080/api/v1` (configurable)
+
+**Endpoints**:
+- `GET /health` - Health check (no auth)
+- `GET /status` - Agent status
+- `POST /task/execute` - Execute task
+- `GET /task/:id/status` - Get task status
+- `POST /task/:id/cancel` - Cancel task
+- `POST /file/upload` - Upload file
+- `GET /file/download` - Download file
+
+## Request/Response Examples
+
+### Success Response
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": 1,
+    "hostname": "node-001",
+    "ip": "192.168.1.100",
+    "status": "online"
+  },
+  "timestamp": "2025-12-01T10:00:00Z"
+}
+```
+
+### Error Response
+
+```json
+{
+  "code": 2001,
+  "message": "node not found",
+  "data": null,
+  "timestamp": "2025-12-01T10:00:00Z"
+}
+```
+
+### Pagination Response
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "total": 100,
+    "items": [...],
+    "page": 1,
+    "page_size": 20
+  },
+  "timestamp": "2025-12-01T10:00:00Z"
+}
+```
+
+## API Documentation
+
+- Manager API: [docs/api/Manager_API.md](mdc:docs/api/Manager_API.md)
+- API Index: [docs/api/README.md](mdc:docs/api/README.md)
+
+## Best Practices
+
+1. **Consistency**: All APIs must follow the unified response format
+2. **Error Codes**: Use standard error codes, never invent new ones
+3. **Documentation**: Keep API docs in sync with code
+4. **Validation**: Validate all input parameters
+5. **Security**: Always authenticate and authorize requests
+6. **Rate Limiting**: Implement rate limiting for public endpoints
+7. **Versioning**: Use `/api/v1/` prefix for versioning

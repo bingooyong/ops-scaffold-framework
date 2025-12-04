@@ -1,0 +1,64 @@
+---
+alwaysApply: true
+---
+# Ops Scaffold Framework - Project Overview
+
+This is a lightweight, highly available distributed operations management platform for centralized management, monitoring, and automated operations of distributed hosts.
+
+## Core Components
+
+The system consists of three core components:
+
+1. **Manager** (Center Management Node): Web service providing global management, monitoring, and version update functionality
+   - Location: `manager/` directory
+   - Independent Go module: `github.com/bingooyong/ops-scaffold-framework/manager`
+   - Tech: Go 1.21+, Gin 1.10.0, GORM 1.25.5, MySQL 8.0+, gRPC
+   - Ports: HTTP API (8080), gRPC (9090)
+
+2. **Daemon** (Guardian Process): Runs on each managed host, responsible for resource collection, Agent management, and status reporting
+   - Location: `daemon/` directory
+   - Independent Go module: `github.com/bingooyong/ops-scaffold-framework/daemon`
+   - Tech: Go 1.21+, gRPC, gopsutil v3
+   - Features: Resource monitoring, Agent lifecycle management, version updates
+
+3. **Agent** (Execution Process): Runs on each managed host, responsible for task execution and HTTP/HTTPS API
+   - Status: ⏳ Under development
+   - Features: Task execution, HTTP API, heartbeat reporting
+
+4. **Web Frontend**: React-based management interface
+   - Location: `web/` directory
+   - Tech: React 18.2+, Vite 7.2, MUI 7.3, Zustand 5.0, React Query 5.90
+   - Features: Dashboard, node management, task management, version management
+
+## Project Structure
+
+```
+ops-scaffold-framework/
+├── manager/          # Manager module (independent Go module)
+├── daemon/           # Daemon module (independent Go module)
+├── web/              # Frontend React application
+└── docs/             # Project documentation
+```
+
+## Key Documentation
+
+- Main project guide: [CLAUDE.md](mdc:CLAUDE.md)
+- Requirements: [docs/运维工具框架需求文档.md](mdc:docs/运维工具框架需求文档.md)
+- Design docs: `docs/设计文档_*.md`
+- API docs: `docs/api/`
+- Frontend standards: [docs/前端开发规范.md](mdc:docs/前端开发规范.md)
+
+## Communication Protocols
+
+- **Manager ↔ Daemon**: gRPC over TLS (mTLS bidirectional authentication)
+- **Manager/Daemon ↔ Agent**: HTTP/HTTPS RESTful API (HMAC-SHA256 request signature)
+- **Daemon ↔ Agent (local)**: Unix Domain Socket / Named Pipe (JSON-RPC 2.0)
+
+## Current Status
+
+- ✅ Manager backend: Complete (HTTP API + gRPC + Auth + Database + Tests)
+- ✅ Daemon: Complete (Resource collection + Agent management + gRPC communication)
+- ✅ Web frontend: Complete (React + Vite + MUI + Auth + Dashboard + Node management)
+- ⏳ Agent: Under development
+
+**Current Version**: v0.3.0

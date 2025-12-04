@@ -1,0 +1,62 @@
+# Daemon配置文件
+
+# 基础配置
+daemon:
+  id: ""  # 留空则自动生成
+  log_level: info  # debug, info, warn, error
+  log_file: /var/log/daemon/daemon.log
+  pid_file: /var/run/daemon.pid
+  work_dir: /var/lib/daemon
+
+# Manager连接配置
+manager:
+  address: "manager.example.com:9090"
+  tls:
+    cert_file: /etc/daemon/certs/client.crt
+    key_file: /etc/daemon/certs/client.key
+    ca_file: /etc/daemon/certs/ca.crt
+  heartbeat_interval: 60s
+  reconnect_interval: 10s
+  timeout: 30s
+
+# Agent管理配置
+agent:
+  binary_path: /usr/local/bin/agent
+  work_dir: /var/lib/agent
+  config_file: /etc/agent/agent.yaml
+  socket_path: /var/run/agent.sock
+  health_check:
+    interval: 30s
+    heartbeat_timeout: 90s
+    cpu_threshold: 50
+    memory_threshold: 524288000  # 500MB
+    threshold_duration: 60s
+  restart:
+    max_retries: 10
+    backoff_base: 10s
+    backoff_max: 60s
+
+# 采集器配置
+collectors:
+  cpu:
+    enabled: true
+    interval: 60s
+  memory:
+    enabled: true
+    interval: 60s
+  disk:
+    enabled: true
+    interval: 60s
+    mount_points: []  # 空则采集所有挂载点
+  network:
+    enabled: true
+    interval: 60s
+    interfaces: []  # 空则采集所有网卡
+
+# 更新配置
+update:
+  download_dir: /var/lib/daemon/downloads
+  backup_dir: /var/lib/daemon/backups
+  max_backups: 5
+  verify_timeout: 300s
+  public_key_file: /etc/daemon/keys/update.pub

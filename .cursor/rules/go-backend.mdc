@@ -1,0 +1,132 @@
+---
+globs: *.go
+description: Go backend coding standards and conventions for Manager and Daemon modules
+---
+# Go Backend Coding Standards
+
+## Module Structure
+
+This project uses **multi-module structure** with independent `go.mod` files:
+
+- **Manager module**: `manager/go.mod` (module: `github.com/bingooyong/ops-scaffold-framework/manager`)
+- **Daemon module**: `daemon/go.mod` (module: `github.com/bingooyong/ops-scaffold-framework/daemon`)
+
+## Architecture Pattern
+
+### Manager Backend (Layered Architecture)
+
+```
+Handler Layer → Service Layer → Repository Layer → Model Layer
+```
+
+**Directory structure**:
+- `internal/handler/` - HTTP handlers (Gin)
+- `internal/service/` - Business logic
+- `internal/repository/` - Data access (GORM)
+- `internal/model/` - Data models
+- `internal/middleware/` - Middleware (JWT auth, CORS, audit, etc.)
+- `internal/grpc/` - gRPC server implementation
+- `pkg/` - Public packages (response, errors, utils)
+
+### Daemon (Modular Architecture)
+
+**Core modules**:
+- `internal/collector/` - System resource collectors (CPU, memory, disk, network)
+- `internal/agent/` - Agent process lifecycle management
+- `internal/comm/` - Communication layer (gRPC client)
+- `internal/daemon/` - Core daemon logic
+- `internal/config/` - Configuration management
+- `internal/logger/` - Logging
+
+## Coding Standards
+
+### Error Handling
+
+- Use structured errors from `pkg/errors/errors.go`
+- Error codes follow convention:
+  - `0`: Success
+  - `1xxx`: Client errors (parameters, authentication, permissions)
+  - `2xxx`: Business errors (nodes, tasks)
+  - `3xxx`: Version management errors
+  - `5xxx`: Server internal errors
+
+### Response Format
+
+All HTTP responses must use unified format from `pkg/response/response.go`:
+
+```go
+{
+  "code": 0,
+  "message": "success",
+  "data": {},
+  "timestamp": "2025-12-01T10:00:00Z"
+}
+```
+
+### Logging
+
+- Use `zap` structured logging
+- Log levels: DEBUG, INFO, WARN, ERROR
+- Include context fields: request_id, user_id, node_id, etc.
+
+### Configuration
+
+- Use YAML format in `configs/` directory
+- Load with Viper
+- Priority: Command line > Environment variables > Config file > Defaults
+
+### Testing
+
+- Unit tests: `*_test.go` files alongside source
+- Integration tests: `test/integration/` directory
+- Use `testify` framework
+- Coverage targets:
+  - Service layer: > 80%
+  - Repository layer: > 70%
+  - Handler layer: > 70%
+
+## Key Design Patterns
+
+### Process Isolation
+
+- **Agent must run as independent process**, not as Daemon subprocess
+- Daemon exit does not affect Agent
+- Agent exceptions trigger Daemon auto-restart with backoff strategy
+
+### Version Update Security
+
+All update packages must pass:
+1. Source verification (Manager IP whitelist/certificate)
+2. Signature verification (RSA-2048/ECDSA)
+3. Integrity check (SHA-256 hash)
+4. Version check (new version > current version)
+
+### Graceful Shutdown
+
+- Handle SIGTERM/SIGINT signals
+- Wait for current tasks to complete (30s timeout)
+- Save state to local storage
+- **Note**: Do not stop Agent process on Daemon shutdown
+
+## gRPC Communication
+
+- Use TLS 1.3 with mTLS bidirectional authentication
+- Manager ↔ Daemon: gRPC over TLS
+- Proto definitions in `pkg/proto/` directory
+- Generate code: `make proto` or `protoc` commands
+
+## Database
+
+- Use GORM with MySQL 8.0+
+- Auto-migrate on startup
+- Connection pool: MaxOpen=100, MaxIdle=10
+- Use transactions for multi-step operations
+
+## Security
+
+- JWT authentication for HTTP API
+- mTLS for gRPC communication
+- Request signature (HMAC-SHA256) for Agent API
+- IP whitelist support
+- Sensitive data encryption in configs
+- Log sanitization

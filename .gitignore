@@ -30,3 +30,20 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Binaries
+/daemon/bin/daemon
+/manager/bin/manager
+
+# Web Frontend
+/web/node_modules/
+/web/dist/
+/web/.env.local
+
+# Logs
+daemon/logs/daemon.log
+daemon/tmp/daemon.pid
+logs/daemon.log
+.gitignore
+logs/manager.log
+manager/logs/manager.log

@@ -1,0 +1,62 @@
+# Daemon开发环境配置文件
+
+# 基础配置
+daemon:
+  id: ""  # 留空则自动生成
+  log_level: debug  # 开发环境使用debug级别
+  log_file: ./logs/daemon.log
+  pid_file: ./tmp/daemon.pid
+  work_dir: ./tmp
+
+# Manager连接配置（开发环境可留空，独立运行）
+manager:
+  address: "127.0.0.1:9090"  # 留空则standalone模式运行
+  tls:
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+  heartbeat_interval: 60s
+  reconnect_interval: 10s
+  timeout: 30s
+
+# Agent管理配置（开发环境可留空，不启动Agent）
+agent:
+  binary_path: ""  # 留空则不启动Agent
+  work_dir: ./tmp/agent
+  config_file: ./configs/agent.yaml
+  socket_path: ./tmp/agent.sock
+  health_check:
+    interval: 30s
+    heartbeat_timeout: 90s
+    cpu_threshold: 50
+    memory_threshold: 524288000  # 500MB
+    threshold_duration: 60s
+  restart:
+    max_retries: 10
+    backoff_base: 10s
+    backoff_max: 60s
+
+# 采集器配置
+collectors:
+  cpu:
+    enabled: true
+    interval: 10s  # 开发环境更短的间隔
+  memory:
+    enabled: true
+    interval: 10s
+  disk:
+    enabled: true
+    interval: 10s
+    mount_points: []  # 空则采集所有挂载点
+  network:
+    enabled: true
+    interval: 10s
+    interfaces: []  # 空则采集所有网卡
+
+# 更新配置
+update:
+  download_dir: ./tmp/downloads
+  backup_dir: ./tmp/backups
+  max_backups: 5
+  verify_timeout: 300s
+  public_key_file: ""
