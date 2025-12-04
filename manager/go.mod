@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/gin-gonic/gin v1.10.0
-	github.com/golang-jwt/jwt/v5 v5.2.0
+	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/zap v1.26.0
