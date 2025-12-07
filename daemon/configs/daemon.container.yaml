@@ -1,0 +1,63 @@
+# Daemon 容器环境配置文件
+# 适用于 Docker/Podman 容器部署
+
+# 基础配置
+daemon:
+  id: ""  # 留空则自动生成，每个容器实例会有唯一 ID
+  log_level: debug  # debug, info, warn, error
+  log_file: /app/logs/daemon.log
+  pid_file: /app/tmp/daemon.pid
+  work_dir: /app/tmp
+
+# Manager连接配置
+manager:
+  address: "manager:9090"  # 通过容器网络连接到 manager 服务
+  tls:
+    cert_file: ""  # 容器环境默认不启用 TLS，可通过挂载卷提供证书
+    key_file: ""
+    ca_file: ""
+  heartbeat_interval: 30s  # 容器环境更短的心跳间隔
+  reconnect_interval: 5s
+  timeout: 15s
+
+# Agent管理配置
+agent:
+  binary_path: ""  # 容器环境不启动 Agent
+  work_dir: /app/tmp/agent
+  config_file: /app/configs/agent.yaml
+  socket_path: /app/tmp/agent.sock
+  health_check:
+    interval: 30s
+    heartbeat_timeout: 90s
+    cpu_threshold: 50
+    memory_threshold: 524288000  # 500MB
+    threshold_duration: 60s
+  restart:
+    max_retries: 10
+    backoff_base: 10s
+    backoff_max: 60s
+
+# 采集器配置
+collectors:
+  cpu:
+    enabled: true
+    interval: 10s  # 更短的采集间隔用于测试
+  memory:
+    enabled: true
+    interval: 10s
+  disk:
+    enabled: true
+    interval: 10s
+    mount_points: []  # 空则采集所有挂载点
+  network:
+    enabled: true
+    interval: 10s
+    interfaces: []  # 空则采集所有网卡
+
+# 更新配置
+update:
+  download_dir: /app/tmp/downloads
+  backup_dir: /app/tmp/backups
+  max_backups: 5
+  verify_timeout: 300s
+  public_key_file: ""

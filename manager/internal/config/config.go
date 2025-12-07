@@ -15,6 +15,7 @@ type Config struct {
 	GRPC     GRPCConfig     `mapstructure:"grpc"`
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	Log      LogConfig      `mapstructure:"log"`
+	Metrics  MetricsConfig  `mapstructure:"metrics"`
 }
 
 // ServerConfig HTTP服务配置
@@ -75,6 +76,12 @@ type LogConfig struct {
 	MaxBackups int    `mapstructure:"max_backups"` // 保留的旧日志文件数
 	MaxAge     int    `mapstructure:"max_age"`     // 天
 	Compress   bool   `mapstructure:"compress"`
+}
+
+// MetricsConfig 监控指标配置
+type MetricsConfig struct {
+	RetentionDays  int    `mapstructure:"retention_days"`  // 数据保留天数，默认 30 天
+	CleanupSchedule string `mapstructure:"cleanup_schedule"` // 清理任务调度，默认 "0 2 * * *"（每天凌晨 2 点）
 }
 
 // Load 加载配置文件
@@ -185,6 +192,14 @@ func setDefaults(config *Config) {
 	}
 	if config.Log.MaxAge == 0 {
 		config.Log.MaxAge = 30
+	}
+
+	// Metrics默认值
+	if config.Metrics.RetentionDays == 0 {
+		config.Metrics.RetentionDays = 30
+	}
+	if config.Metrics.CleanupSchedule == "" {
+		config.Metrics.CleanupSchedule = "0 2 * * *" // 每天凌晨 2 点
 	}
 }
 

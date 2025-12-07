@@ -21,7 +21,9 @@ import (
 	"github.com/bingooyong/ops-scaffold-framework/manager/pkg/database"
 	"github.com/bingooyong/ops-scaffold-framework/manager/pkg/jwt"
 	pb "github.com/bingooyong/ops-scaffold-framework/manager/pkg/proto"
+	daemonpb "github.com/bingooyong/ops-scaffold-framework/manager/pkg/proto/daemon"
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -60,7 +62,7 @@ func main() {
 	}
 
 	// 自动迁移数据库表结构
-	if err := database.AutoMigrate(db); err != nil {
+	if err := database.AutoMigrate(db, log); err != nil {
 		log.Fatal("Failed to migrate database", zap.Error(err))
 	}
 	log.Info("Database migrated successfully")
@@ -79,6 +81,7 @@ func main() {
 	taskRepo := repository.NewTaskRepository(db)
 	versionRepo := repository.NewVersionRepository(db)
 	auditRepo := repository.NewAuditLogRepository(db)
+	agentRepo := repository.NewAgentRepository(db)
 
 	// 6. 初始化Service层
 	authService := service.NewAuthService(userRepo, auditRepo, jwtManager, log)
@@ -86,6 +89,7 @@ func main() {
 	metricsService := service.NewMetricsService(metricsRepo, log)
 	taskService := service.NewTaskService(taskRepo, nodeRepo, auditRepo, log)
 	versionService := service.NewVersionService(versionRepo, auditRepo, log)
+	agentService := service.NewAgentService(agentRepo, log)
 
 	// 避免编译器警告
 	_ = taskService
@@ -94,9 +98,35 @@ func main() {
 	// 7. 初始化Handler层
 	authHandler := handler.NewAuthHandler(authService, log)
 	nodeHandler := handler.NewNodeHandler(nodeService, log)
+	metricsHandler := handler.NewMetricsHandler(metricsService, log)
 
 	// 8. 初始化gRPC服务器
 	grpcSrv := grpcserver.NewServer(nodeService, metricsService, log)
+
+	// 8.1. 初始化 Metrics 清理服务
+	metricsCleaner := service.NewMetricsCleaner(db, cfg.Metrics.RetentionDays, log)
+
+	// 8.2. 初始化 cron 调度器
+	var cronScheduler *cron.Cron
+	if cfg.Metrics.CleanupSchedule != "" {
+		// 使用标准 cron 表达式（5 字段：分 时 日 月 周）
+		// 如果需要秒级精度，可以使用 cron.WithSeconds() 并配置 6 字段表达式
+		cronScheduler = cron.New()
+		_, err = cronScheduler.AddFunc(cfg.Metrics.CleanupSchedule, func() {
+			log.Info("starting scheduled metrics cleanup")
+			if err := metricsCleaner.CleanExpiredPartitions(context.Background()); err != nil {
+				log.Error("scheduled metrics cleanup failed", zap.Error(err))
+			} else {
+				log.Info("scheduled metrics cleanup completed")
+			}
+		})
+		if err != nil {
+			log.Fatal("failed to add metrics cleanup cron job", zap.Error(err))
+		}
+		log.Info("metrics cleanup cron job scheduled",
+			zap.String("schedule", cfg.Metrics.CleanupSchedule),
+			zap.Int("retention_days", cfg.Metrics.RetentionDays))
+	}
 
 	// 9. 初始化Gin引擎
 	gin.SetMode(cfg.Server.Mode)
@@ -144,6 +174,15 @@ func main() {
 			nodes.GET("/statistics", nodeHandler.GetStatistics)
 		}
 
+		// 监控指标相关
+		metrics := api.Group("/metrics")
+		{
+			metrics.GET("/nodes/:node_id/latest", metricsHandler.GetLatestMetrics)
+			metrics.GET("/nodes/:node_id/:type/history", metricsHandler.GetMetricsHistory)
+			metrics.GET("/nodes/:node_id/summary", metricsHandler.GetMetricsSummary)
+			metrics.GET("/cluster/overview", metricsHandler.GetClusterOverview)
+		}
+
 		// 管理员相关（需要管理员权限）
 		admin := api.Group("/admin")
 		admin.Use(middleware.RequireAdmin())
@@ -182,12 +221,22 @@ func main() {
 	grpcServerInstance := grpc.NewServer()
 	pb.RegisterManagerServiceServer(grpcServerInstance, grpcSrv)
 
+	// 注册DaemonService服务器(用于接收Daemon上报的Agent状态)
+	daemonSrv := grpcserver.NewDaemonServer(agentService, log)
+	daemonpb.RegisterDaemonServiceServer(grpcServerInstance, daemonSrv)
+
 	go func() {
 		log.Info("gRPC server starting", zap.String("addr", grpcAddr))
 		if err := grpcServerInstance.Serve(grpcListener); err != nil {
 			log.Fatal("gRPC server failed", zap.Error(err))
 		}
 	}()
+
+	// 13.1. 启动 cron 调度器（在 HTTP 服务器启动后）
+	if cronScheduler != nil {
+		cronScheduler.Start()
+		log.Info("cron scheduler started")
+	}
 
 	// 14. 等待信号
 	quit := make(chan os.Signal, 1)
@@ -208,6 +257,12 @@ func main() {
 	// 关闭gRPC服务器
 	grpcServerInstance.GracefulStop()
 	log.Info("gRPC server stopped")
+
+	// 停止 cron 调度器
+	if cronScheduler != nil {
+		cronScheduler.Stop()
+		log.Info("cron scheduler stopped")
+	}
 
 	// 关闭数据库连接
 	if err := database.Close(); err != nil {

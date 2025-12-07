@@ -28,7 +28,7 @@ export interface NodeStatistics {
   offline: number;
 }
 
-export interface NodeMetrics {
+export interface NodeMetricsData {
   node_id: string;
   timestamp: string;
   cpu: CPUMetrics;

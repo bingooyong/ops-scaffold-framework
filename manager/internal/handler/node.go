@@ -125,7 +125,32 @@ func (h *NodeHandler) GetStatistics(c *gin.Context) {
 		return
 	}
 
+	// 构建完整的统计信息
+	var total, online, offline int64
+
+	// 从统计结果中提取各状态的数量
+	if onlineCount, ok := stats["online"]; ok {
+		online = onlineCount
+		total += onlineCount
+	}
+	if offlineCount, ok := stats["offline"]; ok {
+		offline = offlineCount
+		total += offlineCount
+	}
+	// 处理其他可能的状态（如 unknown）
+	for status, count := range stats {
+		if status != "online" && status != "offline" {
+			total += count
+		}
+	}
+
+	statistics := gin.H{
+		"total":   total,
+		"online":  online,
+		"offline": offline,
+	}
+
 	response.Success(c, gin.H{
-		"statistics": stats,
+		"statistics": statistics,
 	})
 }

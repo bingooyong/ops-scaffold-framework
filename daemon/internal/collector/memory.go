@@ -56,19 +56,26 @@ func (c *MemoryCollector) Collect(ctx context.Context) (*types.Metrics, error) {
 		return nil, err
 	}
 
-	// 组装指标数据
+	// 组装指标数据（使用统一的命名规范）
 	values := map[string]interface{}{
-		"total":        vm.Total,
-		"available":    vm.Available,
-		"used":         vm.Used,
-		"used_percent": vm.UsedPercent,
-		"free":         vm.Free,
+		// 主要字段（与 disk/network 保持一致的命名）
+		"total_bytes":    vm.Total,
+		"used_bytes":     vm.Used,
+		"free_bytes":     vm.Free,
+		"available_bytes": vm.Available,
+		"usage_percent":  vm.UsedPercent,
+		// 详细字段
 		"cached":       vm.Cached,
 		"buffers":      vm.Buffers,
 		"swap_total":   swap.Total,
 		"swap_used":    swap.Used,
 		"swap_free":    swap.Free,
 		"swap_percent": swap.UsedPercent,
+		// 兼容旧字段名（用于向后兼容）
+		"total":     vm.Total,
+		"available": vm.Available,
+		"used":      vm.Used,
+		"free":      vm.Free,
 	}
 
 	metrics := &types.Metrics{

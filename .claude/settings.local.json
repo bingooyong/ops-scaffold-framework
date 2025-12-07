@@ -24,7 +24,13 @@
       "Bash(export GOWORK=off)",
       "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwicm9sZSI6InVzZXIiLCJpc3MiOiJvcHMtbWFuYWdlci1kZXYiLCJleHAiOjE3NjQ4MzMzMTEsIm5iZiI6MTc2NDc0NjkxMSwiaWF0IjoxNzY0NzQ2OTExfQ.4T8VkDnUB04DT_AyO0xjRvnzBN1hZ8Mp3Z3nBSC3McE\")",
       "Bash(npm create:*)",
-      "Bash(npm install)"
+      "Bash(npm install)",
+      "Bash(npx -y task-master-ai --help)",
+      "Bash(npm run build:*)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwicm9sZSI6InVzZXIiLCJpc3MiOiJvcHMtbWFuYWdlci1kZXYiLCJleHAiOjE3NjQ4MzMzMTEsIm5iZiI6MTc2NDc0NjkxMSwiaWF0IjoxNzY0NzQ2OTExfQ.4T8VkDnUB04DT_AyO0xjRvnzBN1hZ8Mp3Z3nBSC3McE\" curl -s -X GET \"http://127.0.0.1:8080/api/v1/metrics/nodes/54d7c648-2e82-4edc-81bf-44a018908bdf/latest\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(python3:*)",
+      "Bash(TOKEN='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoyLCJ1c2VybmFtZSI6Im5ld3VzZXIiLCJyb2xlIjoidXNlciIsImlzcyI6Im9wcy1tYW5hZ2VyLWRldiIsImV4cCI6MTc2NDk1NTEzNywibmJmIjoxNzY0ODY4NzM3LCJpYXQiOjE3NjQ4Njg3Mzd9.n4aOfuSzSL4_emzvU382wVJ_iVfI2_JyFFm77q-My7s' curl -s -X GET 'http://127.0.0.1:8080/api/v1/metrics/nodes/54d7c648-2e82-4edc-81bf-44a018908bdf/latest' -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(TOKEN='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoyLCJ1c2VybmFtZSI6Im5ld3VzZXIiLCJyb2xlIjoidXNlciIsImlzcyI6Im9wcy1tYW5hZ2VyLWRldiIsImV4cCI6MTc2NDk1NTE2NywibmJmIjoxNzY0ODY4NzY3LCJpYXQiOjE3NjQ4Njg3Njd9.Sqr5bpNDHXdtC-F755nUcgza6jAZVwHlgMDAeO-GnPk' curl -s -X GET 'http://127.0.0.1:8080/api/v1/metrics/nodes/54d7c648-2e82-4edc-81bf-44a018908bdf/latest' -H \"Authorization: Bearer $TOKEN\")"
     ],
     "deny": [],
     "ask": []

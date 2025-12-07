@@ -63,6 +63,16 @@ vet:
 	@echo "Running go vet..."
 	$(GOCMD) vet ./...
 
+proto:
+	@echo "Generating protobuf code..."
+	@which protoc > /dev/null || (echo "protoc not installed" && exit 1)
+	@mkdir -p pkg/proto/daemon
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	       pkg/proto/daemon.proto
+	@mv pkg/proto/daemon.pb.go pkg/proto/daemon/ 2>/dev/null || true
+	@mv pkg/proto/daemon_grpc.pb.go pkg/proto/daemon/ 2>/dev/null || true
+
 deps:
 	@echo "Downloading dependencies..."
 	$(GOMOD) download

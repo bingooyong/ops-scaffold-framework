@@ -101,10 +101,11 @@ Manager 使用 JWT (JSON Web Token) 进行身份验证。
 | 1002 | 认证失败 | 401 |
 | 1003 | 无权限 | 403 |
 | 1004 | 资源不存在 | 404 |
+| 1005 | Token 无效或过期 | 401 |
 | 1009 | 用户名或密码错误 | 401 |
 | 2001 | 用户不存在 | 404 |
+| 2003 | 节点不存在 | 404 |
 | 2009 | 用户已存在 | 409 |
-| 2003 | 用户已禁用 | 403 |
 | 2004 | 密码错误 | 401 |
 | 2101 | 节点不存在 | 404 |
 | 2102 | 节点已存在 | 400 |
@@ -733,6 +734,283 @@ curl -X POST http://localhost:8080/api/v1/admin/users/2/enable \
 **示例 curl**:
 ```bash
 curl -X GET http://localhost:8080/health
+```
+
+---
+
+### 4.5 监控指标接口
+
+监控指标接口提供节点资源使用情况的查询功能，支持实时指标、历史趋势和统计聚合查询。所有接口需要 JWT Token 认证，使用 `Authorization: Bearer <token>` header。
+
+**通用参数说明**:
+- 时间参数使用 ISO8601 格式 `YYYY-MM-DDTHH:MM:SSZ`，支持 UTC 或带时区偏移
+- 最大查询时间范围：30 天
+- 指标类型支持：`cpu`、`memory`、`disk`、`network`
+
+**通用错误处理**:
+- 401: Token 无效或过期
+- 404: 节点不存在
+- 400: 参数错误（时间格式错误、时间范围超限、无效的指标类型）
+- 500: 服务器内部错误
+
+---
+
+#### 4.5.1 获取节点最新指标
+
+**接口**: `GET /api/v1/metrics/nodes/:node_id/latest`
+
+**描述**: 获取指定节点所有类型（cpu/memory/disk/network）的最新指标数据，用于实时监控卡片展示。
+
+**权限**: 需要认证
+
+**路径参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 是 | 节点唯一标识符，例如 `daemon-001` |
+
+**请求头**:
+```
+Authorization: Bearer <token>
+```
+
+**成功响应** (200):
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "cpu": {
+      "id": 123,
+      "node_id": "daemon-001",
+      "type": "cpu",
+      "timestamp": "2025-12-04T12:00:00Z",
+      "values": {
+        "usage_percent": 45.2,
+        "cores": 8,
+        "model": "Intel Core i7"
+      }
+    },
+    "memory": {
+      "id": 124,
+      "node_id": "daemon-001",
+      "type": "memory",
+      "timestamp": "2025-12-04T12:00:00Z",
+      "values": {
+        "usage_percent": 60.5,
+        "used_bytes": 8589934592,
+        "total_bytes": 17179869184
+      }
+    },
+    "disk": {
+      "id": 125,
+      "node_id": "daemon-001",
+      "type": "disk",
+      "timestamp": "2025-12-04T12:00:00Z",
+      "values": {
+        "usage_percent": 75.3,
+        "used_bytes": 161061273600,
+        "total_bytes": 214748364800
+      }
+    },
+    "network": {
+      "id": 126,
+      "node_id": "daemon-001",
+      "type": "network",
+      "timestamp": "2025-12-04T12:00:00Z",
+      "values": {
+        "rx_bytes": 1024000,
+        "tx_bytes": 2048000,
+        "rx_packets": 1000,
+        "tx_packets": 2000
+      }
+    }
+  },
+  "timestamp": "2025-12-04T12:00:00Z"
+}
+```
+
+**说明**:
+- 如果某个指标类型无数据，对应的 key 值为 `null`
+- `values` 字段包含该指标类型的具体数值，不同指标类型包含不同的字段
+
+**错误响应**:
+- 401: Token 无效或过期 (错误码 1002)
+- 404: 节点不存在 (错误码 2003)
+- 500: 服务器内部错误
+
+**示例 curl**:
+```bash
+# 设置 Token 环境变量
+export TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+# 获取节点最新指标
+curl -X GET "http://localhost:8080/api/v1/metrics/nodes/daemon-001/latest" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+#### 4.5.2 获取历史指标数据
+
+**接口**: `GET /api/v1/metrics/nodes/:node_id/:type/history`
+
+**描述**: 查询指定节点和指标类型的历史数据，支持自定义时间范围，根据查询范围自动应用采样策略以优化返回数据量。
+
+**权限**: 需要认证
+
+**路径参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 是 | 节点唯一标识符 |
+| type | string | 是 | 指标类型，可选值：`cpu`、`memory`、`disk`、`network` |
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| start_time | string | 是 | 开始时间，ISO8601 格式，例如 `2025-12-01T00:00:00Z` |
+| end_time | string | 是 | 结束时间，ISO8601 格式 |
+
+**采样策略**:
+系统根据查询时间范围自动选择采样间隔，确保返回数据点数量适中（约 300-400 点）：
+
+| 时间范围 | 采样间隔 | 说明 |
+|---------|---------|------|
+| ≤ 15 分钟 | 60 秒（原始数据） | 返回原始数据，保证实时性 |
+| ≤ 1 小时 | 60 秒（原始数据） | 返回原始数据，保证实时性 |
+| ≤ 1 天 | 5 分钟 | 聚合为 5 分钟桶，约 288 个数据点 |
+| ≤ 7 天 | 30 分钟 | 聚合为 30 分钟桶，约 336 个数据点 |
+| ≤ 30 天 | 2 小时 | 聚合为 2 小时桶，约 360 个数据点 |
+
+**成功响应** (200):
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    {
+      "id": 100,
+      "node_id": "daemon-001",
+      "type": "cpu",
+      "timestamp": "2025-12-04T00:00:00Z",
+      "values": {
+        "usage_percent": 45.2
+      }
+    },
+    {
+      "id": 101,
+      "node_id": "daemon-001",
+      "type": "cpu",
+      "timestamp": "2025-12-04T00:05:00Z",
+      "values": {
+        "usage_percent": 46.8
+      }
+    }
+  ],
+  "timestamp": "2025-12-04T12:00:00Z"
+}
+```
+
+**错误响应**:
+- 400: 时间范围超过 30 天 (错误码 1001)
+- 400: 参数格式错误，时间格式不正确 (错误码 1001)
+- 400: 无效的指标类型 (错误码 1001)
+- 401: Token 无效或过期 (错误码 1002)
+- 404: 节点不存在 (错误码 2003)
+- 500: 服务器内部错误
+
+**示例 curl**:
+```bash
+# 查询 1 天历史数据（自动使用 5 分钟聚合）
+curl -X GET "http://localhost:8080/api/v1/metrics/nodes/daemon-001/cpu/history?start_time=2025-12-03T00:00:00Z&end_time=2025-12-04T00:00:00Z" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 查询 7 天历史数据（自动使用 30 分钟聚合）
+curl -X GET "http://localhost:8080/api/v1/metrics/nodes/daemon-001/memory/history?start_time=2025-11-27T00:00:00Z&end_time=2025-12-04T00:00:00Z" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 查询 30 天历史数据（自动使用 2 小时聚合）
+curl -X GET "http://localhost:8080/api/v1/metrics/nodes/daemon-001/disk/history?start_time=2025-11-04T00:00:00Z&end_time=2025-12-04T00:00:00Z" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+#### 4.5.3 获取指标统计摘要
+
+**接口**: `GET /api/v1/metrics/nodes/:node_id/summary`
+
+**描述**: 获取指定节点在时间范围内的资源使用统计（min/max/avg/latest），用于快速了解资源使用趋势。
+
+**权限**: 需要认证
+
+**路径参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 是 | 节点唯一标识符 |
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| start_time | string | 否 | 开始时间，ISO8601 格式，默认 24 小时前 |
+| end_time | string | 否 | 结束时间，ISO8601 格式，默认当前时间 |
+
+**成功响应** (200):
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "cpu": {
+      "min": 10.5,
+      "max": 85.2,
+      "avg": 45.3,
+      "latest": 50.1
+    },
+    "memory": {
+      "min": 20.0,
+      "max": 75.8,
+      "avg": 55.2,
+      "latest": 60.5
+    },
+    "disk": {
+      "min": 30.0,
+      "max": 80.5,
+      "avg": 65.3,
+      "latest": 75.3
+    },
+    "network": {
+      "min": null,
+      "max": null,
+      "avg": null,
+      "latest": null
+    }
+  },
+  "timestamp": "2025-12-04T12:00:00Z"
+}
+```
+
+**说明**:
+- `min`、`max`、`avg` 为时间范围内的统计值（浮点数，单位 % 或字节）
+- `latest` 为最新指标值
+- 如果某个指标类型无数据，对应的 key 值为 `null`
+- 如果时间范围内无数据但存在最新值，统计字段为 `null`，`latest` 字段有值
+
+**错误响应**:
+- 400: 时间范围超过 30 天 (错误码 1001)
+- 400: 参数格式错误 (错误码 1001)
+- 401: Token 无效或过期 (错误码 1002)
+- 404: 节点不存在 (错误码 2003)
+- 500: 服务器内部错误
+
+**示例 curl**:
+```bash
+# 默认查询（最近 24 小时）
+curl -X GET "http://localhost:8080/api/v1/metrics/nodes/daemon-001/summary" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 自定义时间范围
+curl -X GET "http://localhost:8080/api/v1/metrics/nodes/daemon-001/summary?start_time=2025-12-01T00:00:00Z&end_time=2025-12-04T00:00:00Z" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---

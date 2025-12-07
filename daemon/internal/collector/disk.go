@@ -51,7 +51,14 @@ func (c *DiskCollector) Collect(ctx context.Context) (*types.Metrics, error) {
 		return nil, err
 	}
 
-	diskMetrics := make([]map[string]interface{}, 0)
+	// 聚合数据
+	var totalBytes uint64
+	var usedBytes uint64
+	var totalReadBytes uint64
+	var totalWriteBytes uint64
+
+	// 明细数据（保留完整信息供未来扩展）
+	diskDetails := make([]map[string]interface{}, 0)
 
 	for _, partition := range partitions {
 		// 如果指定了挂载点，则只采集指定的
@@ -77,14 +84,28 @@ func (c *DiskCollector) Collect(ctx context.Context) (*types.Metrics, error) {
 			continue
 		}
 
+		// 累加到汇总数据
+		totalBytes += usage.Total
+		usedBytes += usage.Used
+
 		// 获取IO统计（可选）
+		var readBytes, writeBytes uint64
 		ioCounters, err := disk.IOCountersWithContext(ctx, partition.Device)
 		if err != nil {
 			c.logger.Debug("failed to get disk io counters",
 				zap.String("device", partition.Device),
 				zap.Error(err))
+		} else {
+			for _, io := range ioCounters {
+				readBytes = io.ReadBytes
+				writeBytes = io.WriteBytes
+				totalReadBytes += readBytes
+				totalWriteBytes += writeBytes
+				break
+			}
 		}
 
+		// 保存明细数据
 		diskInfo := map[string]interface{}{
 			"mountpoint":   partition.Mountpoint,
 			"device":       partition.Device,
@@ -93,32 +114,40 @@ func (c *DiskCollector) Collect(ctx context.Context) (*types.Metrics, error) {
 			"used":         usage.Used,
 			"free":         usage.Free,
 			"used_percent": usage.UsedPercent,
-			"inodes_total": usage.InodesTotal,
-			"inodes_used":  usage.InodesUsed,
-			"inodes_free":  usage.InodesFree,
+			"read_bytes":   readBytes,
+			"write_bytes":  writeBytes,
 		}
-
-		// 添加IO统计
-		if len(ioCounters) > 0 {
-			for _, io := range ioCounters {
-				diskInfo["read_count"] = io.ReadCount
-				diskInfo["write_count"] = io.WriteCount
-				diskInfo["read_bytes"] = io.ReadBytes
-				diskInfo["write_bytes"] = io.WriteBytes
-				diskInfo["read_time"] = io.ReadTime
-				diskInfo["write_time"] = io.WriteTime
-				break
-			}
-		}
-
-		diskMetrics = append(diskMetrics, diskInfo)
+		diskDetails = append(diskDetails, diskInfo)
 	}
 
+	// 计算使用率
+	var usagePercent float64
+	if totalBytes > 0 {
+		usagePercent = float64(usedBytes) / float64(totalBytes) * 100
+	}
+
+	// 返回数据：同时包含汇总数据（扁平化）和明细数据（数组）
 	metrics := &types.Metrics{
 		Name:      c.Name(),
 		Timestamp: time.Now(),
-		Values:    map[string]interface{}{"disks": diskMetrics},
+		Values: map[string]interface{}{
+			// 汇总数据（扁平化，供前端快速展示）
+			"total_bytes":     totalBytes,
+			"used_bytes":      usedBytes,
+			"free_bytes":      totalBytes - usedBytes,
+			"usage_percent":   usagePercent,
+			"read_bytes":      totalReadBytes,
+			"write_bytes":     totalWriteBytes,
+			"partition_count": len(diskDetails),
+			// 明细数据（数组，供未来扩展使用）
+			"details":         diskDetails,
+		},
 	}
+
+	c.logger.Debug("disk metrics collected",
+		zap.Int("partitions", len(diskDetails)),
+		zap.Float64("usage_percent", usagePercent),
+	)
 
 	return metrics, nil
 }

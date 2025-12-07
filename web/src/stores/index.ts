@@ -3,3 +3,4 @@
  */
 
 export * from './authStore';
+export * from './metricsStore';

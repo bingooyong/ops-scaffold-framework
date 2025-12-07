@@ -20,6 +20,18 @@ service DaemonService {
 
   // PushUpdate 推送更新
   rpc PushUpdate(UpdateRequest) returns (UpdateResponse);
+
+  // ListAgents 列举所有Agent
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+
+  // OperateAgent 操作Agent(启动/停止/重启)
+  rpc OperateAgent(AgentOperationRequest) returns (AgentOperationResponse);
+
+  // GetAgentMetrics 获取Agent资源使用指标
+  rpc GetAgentMetrics(AgentMetricsRequest) returns (AgentMetricsResponse);
+
+  // SyncAgentStates 同步Agent状态(用于Daemon向Manager上报状态)
+  rpc SyncAgentStates(SyncAgentStatesRequest) returns (SyncAgentStatesResponse);
 }
 
 // RegisterRequest 注册请求
@@ -90,4 +102,81 @@ message UpdateRequest {
 message UpdateResponse {
   bool success = 1;
   string message = 2;
+}
+
+// AgentInfo Agent信息
+message AgentInfo {
+  string id = 1;              // Agent唯一标识符
+  string type = 2;            // Agent类型(filebeat/telegraf/node_exporter等)
+  string version = 3;          // Agent版本号(可选)
+  string status = 4;           // 运行状态(running/stopped/error/starting/stopping)
+  int32 pid = 5;               // 进程ID(0表示未运行)
+  int64 start_time = 6;       // 启动时间(Unix时间戳)
+  int32 restart_count = 7;    // 重启次数
+  int64 last_heartbeat = 8;    // 最后心跳时间(Unix时间戳)
+}
+
+// ListAgentsRequest 列举Agent请求
+message ListAgentsRequest {
+  // 空消息,用于请求所有Agent列表
+}
+
+// ListAgentsResponse 列举Agent响应
+message ListAgentsResponse {
+  repeated AgentInfo agents = 1;  // Agent列表
+}
+
+// AgentOperationRequest Agent操作请求
+message AgentOperationRequest {
+  string agent_id = 1;        // Agent ID
+  string operation = 2;        // 操作类型: "start", "stop", "restart"
+}
+
+// AgentOperationResponse Agent操作响应
+message AgentOperationResponse {
+  bool success = 1;            // 操作是否成功
+  string error_message = 2;     // 错误消息(如果失败)
+}
+
+// ResourceDataPoint 资源数据点
+message ResourceDataPoint {
+  int64 timestamp = 1;          // 时间戳(Unix时间戳)
+  double cpu = 2;                // CPU使用率(百分比)
+  uint64 memory_rss = 3;        // 内存占用RSS(字节)
+  uint64 memory_vms = 4;        // 内存占用VMS(字节)
+  uint64 disk_read_bytes = 5;   // 磁盘读取字节数
+  uint64 disk_write_bytes = 6;  // 磁盘写入字节数
+  int32 open_files = 7;         // 打开文件数
+}
+
+// AgentMetricsRequest Agent指标请求
+message AgentMetricsRequest {
+  string agent_id = 1;         // Agent ID
+  int64 duration_seconds = 2;   // 查询时间范围(秒,默认3600即1小时)
+}
+
+// AgentMetricsResponse Agent指标响应
+message AgentMetricsResponse {
+  string agent_id = 1;           // Agent ID
+  repeated ResourceDataPoint data_points = 2;  // 资源使用数据点
+}
+
+// AgentState Agent状态
+message AgentState {
+  string agent_id = 1;          // Agent ID
+  string status = 2;            // 运行状态
+  int32 pid = 3;                // 进程ID
+  int64 last_heartbeat = 4;     // 最后心跳时间
+}
+
+// SyncAgentStatesRequest 同步Agent状态请求
+message SyncAgentStatesRequest {
+  string node_id = 1;           // 节点ID
+  repeated AgentState states = 2; // Agent状态列表
+}
+
+// SyncAgentStatesResponse 同步Agent状态响应
+message SyncAgentStatesResponse {
+  bool success = 1;              // 同步是否成功
+  string message = 2;            // 响应消息
 }

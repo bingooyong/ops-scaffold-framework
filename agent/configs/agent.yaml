@@ -1,0 +1,21 @@
+# Agent 配置文件示例
+
+# Agent 基础配置
+agent_id: "agent-001"          # Agent 唯一标识
+version: "1.0.0"               # Agent 版本号
+
+# 心跳配置
+heartbeat:
+  socket_path: "/tmp/daemon.sock"  # Daemon 心跳接收 Unix Socket 路径
+  interval: 30s                     # 心跳间隔（默认 30 秒）
+
+# HTTP API 配置
+http:
+  port: 8081                   # HTTP 服务监听端口
+  host: "0.0.0.0"             # 监听地址
+
+# 日志配置
+log:
+  level: "info"                # 日志级别: debug/info/warn/error
+  file: ""                     # 日志文件路径（留空则输出到 stdout）
+  format: "json"               # 日志格式: json/text

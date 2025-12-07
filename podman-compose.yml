@@ -1,0 +1,177 @@
+version: '3.8'
+
+# 定义网络
+networks:
+  ops-network:
+    driver: bridge
+
+# 定义卷
+volumes:
+  daemon-node1-logs:
+  daemon-node2-logs:
+  daemon-node3-logs:
+  daemon-node1-data:
+  daemon-node2-data:
+  daemon-node3-data:
+  mysql-data:
+  manager-data:
+
+services:
+  # ============================================
+  # MySQL 8.0 服务
+  # ============================================
+  mysql:
+    image: docker.io/library/mysql:8.0
+    container_name: ops-mysql
+    hostname: mysql
+    networks:
+      - ops-network
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: ops_framework_dev
+      MYSQL_USER: ops_user
+      MYSQL_PASSWORD: ops_password
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    volumes:
+      # 数据持久化
+      - mysql-data:/var/lib/mysql
+      # 配置文件（可选）
+      - ./config/mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      # 初始化脚本（可选）
+      - ./config/mysql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=256M
+      --max-connections=200
+    labels:
+      - "com.ops-scaffold.service=mysql"
+      - "com.ops-scaffold.role=database"
+
+  # ============================================
+  # Manager 服务（如果需要同时启动 manager）
+  # ============================================
+  # manager:
+  #   build:
+  #     context: .
+  #     dockerfile: manager/Dockerfile
+  #   container_name: ops-manager
+  #   hostname: manager
+  #   networks:
+  #     - ops-network
+  #   ports:
+  #     - "9090:9090"    # gRPC 端口
+  #     - "8080:8080"    # HTTP API 端口
+  #   environment:
+  #     - LOG_LEVEL=debug
+  #     - DB_HOST=mysql
+  #     - DB_PORT=3306
+  #     - DB_USER=ops_user
+  #     - DB_PASSWORD=ops_password
+  #     - DB_NAME=ops_framework
+  #   volumes:
+  #     - ./manager/configs:/app/configs:ro
+  #     - manager-data:/app/data
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # ============================================
+  # Daemon 节点 1
+  # ============================================
+  daemon-node1:
+    build:
+      context: .
+      dockerfile: daemon/Dockerfile
+    container_name: ops-daemon-node1
+    hostname: daemon-node1
+    networks:
+      - ops-network
+    environment:
+      - NODE_NAME=daemon-node1
+      - MANAGER_ADDRESS=192.168.220.41:9090
+      - LOG_LEVEL=debug
+    volumes:
+      - daemon-node1-logs:/app/logs
+      - daemon-node1-data:/app/tmp
+    # depends_on:
+    #   - manager  # 如果 manager 在同一个 compose 中启动
+    restart: unless-stopped
+    labels:
+      - "com.ops-scaffold.node=daemon-node1"
+      - "com.ops-scaffold.role=daemon"
+
+  # ============================================
+  # Daemon 节点 2
+  # ============================================
+  daemon-node2:
+    build:
+      context: .
+      dockerfile: daemon/Dockerfile
+    container_name: ops-daemon-node2
+    hostname: daemon-node2
+    networks:
+      - ops-network
+    environment:
+      - NODE_NAME=daemon-node2
+      - MANAGER_ADDRESS=192.168.220.41:9090
+      - LOG_LEVEL=debug
+    volumes:
+      - daemon-node2-logs:/app/logs
+      - daemon-node2-data:/app/tmp
+    # depends_on:
+    #   - manager
+    restart: unless-stopped
+    labels:
+      - "com.ops-scaffold.node=daemon-node2"
+      - "com.ops-scaffold.role=daemon"
+
+  # ============================================
+  # Daemon 节点 3
+  # ============================================
+  daemon-node3:
+    build:
+      context: .
+      dockerfile: daemon/Dockerfile
+    container_name: ops-daemon-node3
+    hostname: daemon-node3
+    networks:
+      - ops-network
+    environment:
+      - NODE_NAME=daemon-node3
+      - MANAGER_ADDRESS=192.168.220.41:9090
+      - LOG_LEVEL=debug
+    volumes:
+      - daemon-node3-logs:/app/logs
+      - daemon-node3-data:/app/tmp
+    # depends_on:
+    #   - manager
+    restart: unless-stopped
+    labels:
+      - "com.ops-scaffold.node=daemon-node3"
+      - "com.ops-scaffold.role=daemon"
+
+  # ============================================
+  # 可以继续添加更多节点...
+  # ============================================
+  # daemon-node4:
+  #   extends: daemon-node1
+  #   container_name: ops-daemon-node4
+  #   hostname: daemon-node4
+  #   environment:
+  #     - NODE_NAME=daemon-node4
+  #   volumes:
+  #     - daemon-node4-logs:/app/logs
+  #     - daemon-node4-data:/app/tmp

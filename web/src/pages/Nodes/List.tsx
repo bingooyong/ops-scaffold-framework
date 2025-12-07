@@ -3,6 +3,7 @@
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -24,6 +25,7 @@ import { formatDateTime } from '../../utils';
 import type { NodeStatus } from '../../types';
 
 export default function NodeList() {
+  const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(20);
 
@@ -115,7 +117,22 @@ export default function NodeList() {
                 nodes.map((node) => (
                   <TableRow key={node.id} hover>
                     <TableCell>{node.node_id}</TableCell>
-                    <TableCell>{node.hostname}</TableCell>
+                    <TableCell>
+                      <Typography
+                        component="a"
+                        onClick={() => navigate(`/nodes/${node.node_id}`)}
+                        sx={{
+                          cursor: 'pointer',
+                          color: 'primary.main',
+                          textDecoration: 'none',
+                          '&:hover': {
+                            textDecoration: 'underline',
+                          },
+                        }}
+                      >
+                        {node.hostname}
+                      </Typography>
+                    </TableCell>
                     <TableCell>{node.ip}</TableCell>
                     <TableCell>{node.os}</TableCell>
                     <TableCell>{node.arch}</TableCell>

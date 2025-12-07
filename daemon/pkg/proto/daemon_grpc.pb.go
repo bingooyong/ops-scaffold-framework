@@ -19,11 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DaemonService_Register_FullMethodName      = "/proto.DaemonService/Register"
-	DaemonService_Heartbeat_FullMethodName     = "/proto.DaemonService/Heartbeat"
-	DaemonService_ReportMetrics_FullMethodName = "/proto.DaemonService/ReportMetrics"
-	DaemonService_GetConfig_FullMethodName     = "/proto.DaemonService/GetConfig"
-	DaemonService_PushUpdate_FullMethodName    = "/proto.DaemonService/PushUpdate"
+	DaemonService_Register_FullMethodName        = "/proto.DaemonService/Register"
+	DaemonService_Heartbeat_FullMethodName       = "/proto.DaemonService/Heartbeat"
+	DaemonService_ReportMetrics_FullMethodName   = "/proto.DaemonService/ReportMetrics"
+	DaemonService_GetConfig_FullMethodName       = "/proto.DaemonService/GetConfig"
+	DaemonService_PushUpdate_FullMethodName      = "/proto.DaemonService/PushUpdate"
+	DaemonService_ListAgents_FullMethodName      = "/proto.DaemonService/ListAgents"
+	DaemonService_OperateAgent_FullMethodName    = "/proto.DaemonService/OperateAgent"
+	DaemonService_GetAgentMetrics_FullMethodName = "/proto.DaemonService/GetAgentMetrics"
+	DaemonService_SyncAgentStates_FullMethodName = "/proto.DaemonService/SyncAgentStates"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -42,6 +46,14 @@ type DaemonServiceClient interface {
 	GetConfig(ctx context.Context, in *ConfigRequest, opts ...grpc.CallOption) (*ConfigResponse, error)
 	// PushUpdate 推送更新
 	PushUpdate(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*UpdateResponse, error)
+	// ListAgents 列举所有Agent
+	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
+	// OperateAgent 操作Agent(启动/停止/重启)
+	OperateAgent(ctx context.Context, in *AgentOperationRequest, opts ...grpc.CallOption) (*AgentOperationResponse, error)
+	// GetAgentMetrics 获取Agent资源使用指标
+	GetAgentMetrics(ctx context.Context, in *AgentMetricsRequest, opts ...grpc.CallOption) (*AgentMetricsResponse, error)
+	// SyncAgentStates 同步Agent状态(用于Daemon向Manager上报状态)
+	SyncAgentStates(ctx context.Context, in *SyncAgentStatesRequest, opts ...grpc.CallOption) (*SyncAgentStatesResponse, error)
 }
 
 type daemonServiceClient struct {
@@ -102,6 +114,46 @@ func (c *daemonServiceClient) PushUpdate(ctx context.Context, in *UpdateRequest,
 	return out, nil
 }
 
+func (c *daemonServiceClient) ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListAgents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) OperateAgent(ctx context.Context, in *AgentOperationRequest, opts ...grpc.CallOption) (*AgentOperationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AgentOperationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_OperateAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) GetAgentMetrics(ctx context.Context, in *AgentMetricsRequest, opts ...grpc.CallOption) (*AgentMetricsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AgentMetricsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_GetAgentMetrics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) SyncAgentStates(ctx context.Context, in *SyncAgentStatesRequest, opts ...grpc.CallOption) (*SyncAgentStatesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncAgentStatesResponse)
+	err := c.cc.Invoke(ctx, DaemonService_SyncAgentStates_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServiceServer is the server API for DaemonService service.
 // All implementations must embed UnimplementedDaemonServiceServer
 // for forward compatibility.
@@ -118,6 +170,14 @@ type DaemonServiceServer interface {
 	GetConfig(context.Context, *ConfigRequest) (*ConfigResponse, error)
 	// PushUpdate 推送更新
 	PushUpdate(context.Context, *UpdateRequest) (*UpdateResponse, error)
+	// ListAgents 列举所有Agent
+	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
+	// OperateAgent 操作Agent(启动/停止/重启)
+	OperateAgent(context.Context, *AgentOperationRequest) (*AgentOperationResponse, error)
+	// GetAgentMetrics 获取Agent资源使用指标
+	GetAgentMetrics(context.Context, *AgentMetricsRequest) (*AgentMetricsResponse, error)
+	// SyncAgentStates 同步Agent状态(用于Daemon向Manager上报状态)
+	SyncAgentStates(context.Context, *SyncAgentStatesRequest) (*SyncAgentStatesResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
 
@@ -142,6 +202,18 @@ func (UnimplementedDaemonServiceServer) GetConfig(context.Context, *ConfigReques
 }
 func (UnimplementedDaemonServiceServer) PushUpdate(context.Context, *UpdateRequest) (*UpdateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PushUpdate not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAgents not implemented")
+}
+func (UnimplementedDaemonServiceServer) OperateAgent(context.Context, *AgentOperationRequest) (*AgentOperationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method OperateAgent not implemented")
+}
+func (UnimplementedDaemonServiceServer) GetAgentMetrics(context.Context, *AgentMetricsRequest) (*AgentMetricsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAgentMetrics not implemented")
+}
+func (UnimplementedDaemonServiceServer) SyncAgentStates(context.Context, *SyncAgentStatesRequest) (*SyncAgentStatesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncAgentStates not implemented")
 }
 func (UnimplementedDaemonServiceServer) mustEmbedUnimplementedDaemonServiceServer() {}
 func (UnimplementedDaemonServiceServer) testEmbeddedByValue()                       {}
@@ -254,6 +326,78 @@ func _DaemonService_PushUpdate_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_ListAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListAgents(ctx, req.(*ListAgentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_OperateAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AgentOperationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).OperateAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_OperateAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).OperateAgent(ctx, req.(*AgentOperationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_GetAgentMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AgentMetricsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).GetAgentMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_GetAgentMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).GetAgentMetrics(ctx, req.(*AgentMetricsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_SyncAgentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SyncAgentStatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).SyncAgentStates(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_SyncAgentStates_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).SyncAgentStates(ctx, req.(*SyncAgentStatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonService_ServiceDesc is the grpc.ServiceDesc for DaemonService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -280,6 +424,22 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PushUpdate",
 			Handler:    _DaemonService_PushUpdate_Handler,
+		},
+		{
+			MethodName: "ListAgents",
+			Handler:    _DaemonService_ListAgents_Handler,
+		},
+		{
+			MethodName: "OperateAgent",
+			Handler:    _DaemonService_OperateAgent_Handler,
+		},
+		{
+			MethodName: "GetAgentMetrics",
+			Handler:    _DaemonService_GetAgentMetrics_Handler,
+		},
+		{
+			MethodName: "SyncAgentStates",
+			Handler:    _DaemonService_SyncAgentStates_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

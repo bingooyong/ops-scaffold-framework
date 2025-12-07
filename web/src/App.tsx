@@ -11,7 +11,7 @@ import { ProtectedRoute } from './router/ProtectedRoute';
 import { MainLayout } from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import { NodeList } from './pages/Nodes';
+import { NodeList, NodeDetail } from './pages/Nodes';
 
 // 创建 QueryClient 实例
 const queryClient = new QueryClient({
@@ -43,6 +43,7 @@ function App() {
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="nodes" element={<NodeList />} />
+              <Route path="nodes/:id" element={<NodeDetail />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
