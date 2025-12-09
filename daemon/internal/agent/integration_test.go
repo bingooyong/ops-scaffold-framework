@@ -103,7 +103,7 @@ func TestMultiAgentManagement_EndToEnd(t *testing.T) {
 	}
 
 	// 7. 测试批量停止
-	stopResults := mam.StopAll(ctx)
+	stopResults := mam.StopAll(ctx, false)
 	if len(stopResults) != len(agents) {
 		t.Errorf("expected %d stop results, got %d", len(agents), len(stopResults))
 	}
@@ -357,17 +357,17 @@ agent_defaults:
 	}
 
 	// 验证可以获取Agent
-	info1, err := registry.Get("filebeat-1")
-	if err != nil {
-		t.Fatalf("failed to get agent filebeat-1: %v", err)
+	info1 := registry.Get("filebeat-1")
+	if info1 == nil {
+		t.Fatalf("failed to get agent filebeat-1: agent not found")
 	}
 	if info1.ID != "filebeat-1" {
 		t.Errorf("expected ID 'filebeat-1', got '%s'", info1.ID)
 	}
 
-	info2, err := registry.Get("telegraf-1")
-	if err != nil {
-		t.Fatalf("failed to get agent telegraf-1: %v", err)
+	info2 := registry.Get("telegraf-1")
+	if info2 == nil {
+		t.Fatalf("failed to get agent telegraf-1: agent not found")
 	}
 	if info2.ID != "telegraf-1" {
 		t.Errorf("expected ID 'telegraf-1', got '%s'", info2.ID)

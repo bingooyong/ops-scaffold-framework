@@ -67,11 +67,10 @@ proto:
 	@echo "Generating protobuf code..."
 	@which protoc > /dev/null || (echo "protoc not installed" && exit 1)
 	@mkdir -p pkg/proto/daemon
+	# 使用 daemon/daemon.proto 路径避免与 daemon 模块的 pkg/proto/daemon.proto 冲突
 	protoc --go_out=. --go_opt=paths=source_relative \
 	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-	       pkg/proto/daemon.proto
-	@mv pkg/proto/daemon.pb.go pkg/proto/daemon/ 2>/dev/null || true
-	@mv pkg/proto/daemon_grpc.pb.go pkg/proto/daemon/ 2>/dev/null || true
+	       pkg/proto/daemon/daemon.proto
 
 deps:
 	@echo "Downloading dependencies..."

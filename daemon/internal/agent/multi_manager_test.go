@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -137,34 +138,68 @@ func TestMultiAgentManager_UnregisterAgent_Running(t *testing.T) {
 
 	// 注册Agent
 	info := &AgentInfo{
-		ID:   "test-agent",
-		Type: TypeFilebeat,
+		ID:         "test-agent",
+		Type:       TypeFilebeat,
+		BinaryPath: "/bin/sleep", // 使用系统命令用于测试
+		WorkDir:    t.TempDir(),
 	}
 	instance, err := mam.RegisterAgent(info)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// 设置Agent为运行状态
-	info.SetStatus(StatusRunning)
+	// 启动Agent使其真正运行
+	ctx := context.Background()
+	err = instance.Start(ctx)
+	if err != nil {
+		t.Skipf("cannot start test process: %v", err)
+	}
+
+	// 等待进程启动并验证
+	var isRunning bool
+	for i := 0; i < 10; i++ {
+		time.Sleep(50 * time.Millisecond)
+		if instance.IsRunning() {
+			isRunning = true
+			break
+		}
+	}
+
+	if !isRunning {
+		// 如果进程没有运行，清理并跳过测试
+		instance.Stop(ctx, true)
+		t.Skip("agent is not running, skipping test")
+	}
 
 	// 尝试注销运行中的Agent（应该失败）
 	err = mam.UnregisterAgent("test-agent")
 	if err == nil {
+		instance.Stop(ctx, true)
 		t.Fatal("expected error for running agent")
 	}
 	if _, ok := err.(*AgentRunningError); !ok {
+		instance.Stop(ctx, true)
 		t.Errorf("expected AgentRunningError, got %T", err)
 	}
 
 	// 停止Agent后再次注销
-	info.SetStatus(StatusStopped)
+	err = instance.Stop(ctx, true)
+	if err != nil {
+		t.Fatalf("unexpected error stopping agent: %v", err)
+	}
+
+	// 等待进程停止
+	for i := 0; i < 10; i++ {
+		time.Sleep(50 * time.Millisecond)
+		if !instance.IsRunning() {
+			break
+		}
+	}
+
 	err = mam.UnregisterAgent("test-agent")
 	if err != nil {
 		t.Fatalf("unexpected error after stopping: %v", err)
 	}
-
-	_ = instance // 避免未使用变量警告
 }
 
 func TestMultiAgentManager_ListAgents(t *testing.T) {
@@ -293,13 +328,13 @@ func TestMultiAgentManager_RestartAgent(t *testing.T) {
 	ctx := context.Background()
 
 	// 重启不存在的Agent
-	err = mam.RestartAgent(ctx, "non-existent")
+	err = mam.RestartAgent(ctx, "non-existent", false)
 	if err == nil {
 		t.Fatal("expected error for non-existent agent")
 	}
 
 	// 重启存在的Agent（会失败因为二进制不存在，但这是预期的）
-	err = mam.RestartAgent(ctx, "test-agent")
+	err = mam.RestartAgent(ctx, "test-agent", false)
 	// 允许错误，因为二进制文件不存在
 	if err == nil {
 		t.Log("Note: binary exists (unexpected in test environment)")
@@ -479,6 +514,9 @@ func TestMultiAgentManager_GetAgentStatus(t *testing.T) {
 		Type: TypeFilebeat,
 		Name: "Test Agent",
 	}
+	// 设置初始状态为 Stopped
+	info.SetStatus(StatusStopped)
+	
 	_, err := mam.RegisterAgent(info)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

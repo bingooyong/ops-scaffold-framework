@@ -3,7 +3,10 @@ package agent
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -236,7 +239,7 @@ func TestAgentInstance_GetLogFilePath(t *testing.T) {
 	}
 	instance1 := NewAgentInstance(info1, logger)
 	logPath1 := instance1.getLogFilePath()
-	expectedPath1 := "/var/lib/daemon/agents/test-agent-1/test-agent-1.log"
+	expectedPath1 := "/var/lib/daemon/agents/test-agent-1/agents/test-agent-1/logs/agent.log"
 	if logPath1 != expectedPath1 {
 		t.Errorf("expected log path %s, got %s", expectedPath1, logPath1)
 	}
@@ -249,7 +252,7 @@ func TestAgentInstance_GetLogFilePath(t *testing.T) {
 	}
 	instance2 := NewAgentInstance(info2, logger)
 	logPath2 := instance2.getLogFilePath()
-	expectedPath2 := "/tmp/test-agent-2.log"
+	expectedPath2 := "/tmp/agents/test-agent-2/logs/agent.log"
 	if logPath2 != expectedPath2 {
 		t.Errorf("expected log path %s, got %s", expectedPath2, logPath2)
 	}
@@ -345,6 +348,95 @@ func TestAgentInstance_Start_InvalidBinary(t *testing.T) {
 	}
 }
 
+// TestAgentInstance_Stop_ProcessNilButPIDExists 测试 process 为 nil 但 PID 不为 0 的情况
+func TestAgentInstance_Stop_ProcessNilButPIDExists(t *testing.T) {
+	logger := zap.NewNop()
+	info := &AgentInfo{
+		ID:   "test-agent",
+		Type: TypeFilebeat,
+	}
+
+	instance := NewAgentInstance(info, logger)
+	ctx := context.Background()
+
+	// 创建一个临时进程用于测试
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start test process: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	pid := cmd.Process.Pid
+	info.SetPID(pid)
+	info.SetStatus(StatusRunning)
+
+	// 模拟 process 对象为 nil 的情况
+	instance.mu.Lock()
+	instance.process = nil
+	instance.mu.Unlock()
+
+	// 停止应该成功，通过 PID 找到进程并停止
+	err := instance.Stop(ctx, true)
+	if err != nil {
+		t.Errorf("expected no error when stopping with nil process but valid PID, got %v", err)
+	}
+
+	// 验证进程已停止
+	if err := cmd.Process.Signal(syscall.Signal(0)); err == nil {
+		t.Error("expected process to be stopped")
+	}
+
+	// 验证状态已更新
+	if status := info.GetStatus(); status != StatusStopped {
+		t.Errorf("expected status StatusStopped, got %s", status)
+	}
+	if pid := info.GetPID(); pid != 0 {
+		t.Errorf("expected PID 0 after stop, got %d", pid)
+	}
+}
+
+// TestAgentInstance_Stop_ProcessAlreadyExited 测试进程已经退出的情况
+func TestAgentInstance_Stop_ProcessAlreadyExited(t *testing.T) {
+	logger := zap.NewNop()
+	info := &AgentInfo{
+		ID:   "test-agent",
+		Type: TypeFilebeat,
+	}
+
+	instance := NewAgentInstance(info, logger)
+	ctx := context.Background()
+
+	// 创建一个快速退出的进程
+	cmd := exec.Command("true") // true 命令立即退出
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start test process: %v", err)
+	}
+	cmd.Wait() // 等待进程退出
+
+	pid := cmd.Process.Pid
+	info.SetPID(pid)
+	info.SetStatus(StatusRunning)
+
+	// 设置 process 对象
+	instance.mu.Lock()
+	instance.process = cmd.Process
+	instance.mu.Unlock()
+
+	// 停止应该成功，即使进程已经退出
+	err := instance.Stop(ctx, true)
+	if err != nil {
+		t.Errorf("expected no error when stopping already exited process, got %v", err)
+	}
+
+	// 验证状态已更新
+	if status := info.GetStatus(); status != StatusStopped {
+		t.Errorf("expected status StatusStopped, got %s", status)
+	}
+	if pid := info.GetPID(); pid != 0 {
+		t.Errorf("expected PID 0 after stop, got %d", pid)
+	}
+}
+
 func TestAgentInstance_Stop_NotRunning(t *testing.T) {
 	logger := zap.NewNop()
 	info := &AgentInfo{
@@ -359,6 +451,59 @@ func TestAgentInstance_Stop_NotRunning(t *testing.T) {
 	err := instance.Stop(ctx, true)
 	if err != nil {
 		t.Errorf("expected no error when stopping non-running agent, got %v", err)
+	}
+}
+
+// TestAgentInstance_Stop_Concurrent 测试并发 Stop 调用
+func TestAgentInstance_Stop_Concurrent(t *testing.T) {
+	logger := zap.NewNop()
+	info := &AgentInfo{
+		ID:   "test-agent",
+		Type: TypeFilebeat,
+	}
+
+	instance := NewAgentInstance(info, logger)
+	ctx := context.Background()
+
+	// 创建一个临时进程用于测试
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start test process: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	pid := cmd.Process.Pid
+	info.SetPID(pid)
+	info.SetStatus(StatusRunning)
+
+	instance.mu.Lock()
+	instance.process = cmd.Process
+	instance.mu.Unlock()
+
+	// 并发调用 Stop
+	var wg sync.WaitGroup
+	errors := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := instance.Stop(ctx, true); err != nil {
+				errors <- err
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// 检查是否有错误
+	for err := range errors {
+		t.Errorf("unexpected error in concurrent Stop: %v", err)
+	}
+
+	// 验证进程已停止
+	if err := cmd.Process.Signal(syscall.Signal(0)); err == nil {
+		t.Error("expected process to be stopped")
 	}
 }
 
@@ -382,12 +527,54 @@ func TestAgentInstance_Restart_NotRunning(t *testing.T) {
 	info.WorkDir = workDir
 
 	// 重启未运行的Agent应该尝试启动（但会失败因为二进制不存在）
-	err := instance.Restart(ctx)
+	err := instance.Restart(ctx, false)
 	if err == nil {
 		t.Error("expected error when restarting with non-existent binary")
 	}
 
 	// 状态应该为失败
+	if status := info.GetStatus(); status != StatusFailed {
+		t.Errorf("expected status StatusFailed, got %s", status)
+	}
+}
+
+// TestAgentInstance_Restart_StopFailedButProcessExited 测试 Stop 失败但进程已退出的情况
+func TestAgentInstance_Restart_StopFailedButProcessExited(t *testing.T) {
+	logger := zap.NewNop()
+	info := &AgentInfo{
+		ID:         "test-agent",
+		Type:       TypeFilebeat,
+		BinaryPath: "/nonexistent/binary",
+		ConfigFile: "/nonexistent/config.yml",
+		WorkDir:    "/tmp/test-agent",
+	}
+
+	instance := NewAgentInstance(info, logger)
+	ctx := context.Background()
+
+	// 创建一个快速退出的进程
+	cmd := exec.Command("true")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start test process: %v", err)
+	}
+	cmd.Wait()
+
+	pid := cmd.Process.Pid
+	info.SetPID(pid)
+	info.SetStatus(StatusRunning)
+
+	instance.mu.Lock()
+	instance.process = cmd.Process
+	instance.mu.Unlock()
+
+	// 重启应该继续，即使 Stop 时进程已退出
+	// 注意：由于二进制不存在，启动会失败，但这是预期的
+	err := instance.Restart(ctx, true)
+	if err == nil {
+		t.Error("expected error when restarting with non-existent binary")
+	}
+
+	// 状态应该为失败（因为启动失败）
 	if status := info.GetStatus(); status != StatusFailed {
 		t.Errorf("expected status StatusFailed, got %s", status)
 	}
@@ -399,6 +586,8 @@ func TestAgentInstance_StatusTransitions(t *testing.T) {
 		ID:   "test-agent",
 		Type: TypeFilebeat,
 	}
+	// 设置初始状态为 Stopped
+	info.SetStatus(StatusStopped)
 
 	_ = NewAgentInstance(info, logger)
 
@@ -429,6 +618,124 @@ func TestAgentInstance_StatusTransitions(t *testing.T) {
 	}
 }
 
+// TestAgentInstance_Start_Concurrent 测试并发 Start 调用
+func TestAgentInstance_Start_Concurrent(t *testing.T) {
+	logger := zap.NewNop()
+	tempDir := createTempTestDir(t)
+	defer os.RemoveAll(tempDir)
+
+	info := &AgentInfo{
+		ID:         "test-agent",
+		Type:       TypeCustom,
+		BinaryPath: "/bin/sleep", // 使用系统命令
+		ConfigFile: "",
+		WorkDir:    tempDir,
+	}
+
+	instance := NewAgentInstance(info, logger)
+	ctx := context.Background()
+
+	// 并发调用 Start
+	var wg sync.WaitGroup
+	errors := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := instance.Start(ctx); err != nil {
+				errors <- err
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// 应该只有一个成功启动，其他的应该失败或忽略
+	errorCount := 0
+	for err := range errors {
+		if err != nil {
+			errorCount++
+		}
+	}
+
+	// 验证只有一个进程在运行
+	runningCount := 0
+	if instance.IsRunning() {
+		runningCount++
+	}
+
+	if runningCount > 1 {
+		t.Errorf("expected at most 1 running process, got %d", runningCount)
+	}
+
+	// 清理
+	instance.Stop(ctx, true)
+}
+
+// TestAgentInstance_ManuallyStopped 测试手动停止标志
+func TestAgentInstance_ManuallyStopped(t *testing.T) {
+	logger := zap.NewNop()
+	info := &AgentInfo{
+		ID:   "test-agent",
+		Type: TypeFilebeat,
+	}
+
+	instance := NewAgentInstance(info, logger)
+	ctx := context.Background()
+
+	// 初始状态应该不是手动停止
+	if instance.IsManuallyStopped() {
+		t.Error("expected not manually stopped initially")
+	}
+
+	// 停止后应该标记为手动停止
+	err := instance.Stop(ctx, true)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if !instance.IsManuallyStopped() {
+		t.Error("expected manually stopped after Stop")
+	}
+
+	// 启动后应该清除手动停止标志
+	info.BinaryPath = "/nonexistent/binary"
+	info.WorkDir = "/tmp/test-agent"
+	_ = instance.Start(ctx) // 会失败，但不影响测试
+
+	if instance.IsManuallyStopped() {
+		t.Error("expected not manually stopped after Start")
+	}
+}
+
+// TestAgentInstance_IsRunning_ProcessNil 测试 process 为 nil 时的 IsRunning
+func TestAgentInstance_IsRunning_ProcessNil(t *testing.T) {
+	logger := zap.NewNop()
+	info := &AgentInfo{
+		ID:   "test-agent",
+		Type: TypeFilebeat,
+	}
+
+	instance := NewAgentInstance(info, logger)
+
+	// 初始状态应该未运行
+	if instance.IsRunning() {
+		t.Error("expected not running initially")
+	}
+
+	// 设置 PID 但 process 为 nil
+	info.SetPID(12345)
+	instance.mu.Lock()
+	instance.process = nil
+	instance.mu.Unlock()
+
+	// 应该返回 false（因为 process 为 nil）
+	if instance.IsRunning() {
+		t.Error("expected not running when process is nil")
+	}
+}
+
 // 辅助函数：创建临时测试目录
 func createTempTestDir(t *testing.T) string {
 	dir, err := os.MkdirTemp("", "agent-test-*")
@@ -452,7 +759,7 @@ func TestAgentInstance_LogFilePath(t *testing.T) {
 	instance := NewAgentInstance(info, logger)
 	logPath := instance.getLogFilePath()
 
-	expectedPath := filepath.Join(tempDir, "test-log-agent.log")
+	expectedPath := filepath.Join(tempDir, "agents", "test-log-agent", "logs", "agent.log")
 	if logPath != expectedPath {
 		t.Errorf("expected log path %s, got %s", expectedPath, logPath)
 	}

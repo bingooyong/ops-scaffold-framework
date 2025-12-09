@@ -11,16 +11,20 @@ export interface Node {
   arch: string;
   status: NodeStatus;
   labels?: Record<string, string>;
+  daemon_version?: string;
+  agent_version?: string;
   created_at: string;
   updated_at: string;
-  last_heartbeat_at?: string;
+  last_seen_at?: string;
 }
 
-export enum NodeStatus {
-  Online = 'online',
-  Offline = 'offline',
-  Unknown = 'unknown',
-}
+export const NodeStatus = {
+  Online: 'online',
+  Offline: 'offline',
+  Unknown: 'unknown',
+} as const;
+
+export type NodeStatus = typeof NodeStatus[keyof typeof NodeStatus];
 
 export interface NodeStatistics {
   total: number;

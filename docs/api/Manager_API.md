@@ -16,6 +16,8 @@
    - [节点管理接口](#42-节点管理接口)
    - [用户管理接口](#43-用户管理接口)
    - [健康检查](#44-健康检查)
+   - [Agent 管理接口](#45-agent-管理接口)
+   - [监控指标接口](#46-监控指标接口)
 5. [gRPC 接口](#5-grpc-接口)
 
 ---
@@ -109,6 +111,10 @@ Manager 使用 JWT (JSON Web Token) 进行身份验证。
 | 2004 | 密码错误 | 401 |
 | 2101 | 节点不存在 | 404 |
 | 2102 | 节点已存在 | 400 |
+| 3001 | Agent不存在 | 404 |
+| 3002 | 操作失败 | 500 |
+| 3003 | 无效的操作类型 | 400 |
+| 3004 | 功能未实现 | 501 |
 | 5001 | 服务器内部错误 | 500 |
 | 5002 | 数据库错误 | 500 |
 
@@ -738,7 +744,307 @@ curl -X GET http://localhost:8080/health
 
 ---
 
-### 4.5 监控指标接口
+### 4.5 Agent 管理接口
+
+Agent 管理接口提供节点下 Agent 的查询、操作和日志查看功能。所有接口需要 JWT Token 认证，使用 `Authorization: Bearer <token>` header。
+
+---
+
+#### 4.5.1 获取节点下的所有Agent
+
+**接口**: `GET /api/v1/nodes/:node_id/agents`
+
+**描述**: 获取指定节点下的所有 Agent 列表
+
+**权限**: 需要认证
+
+**请求头**:
+```
+Authorization: Bearer <token>
+```
+
+**路径参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 是 | 节点唯一标识符 |
+
+**成功响应** (200):
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "agents": [
+      {
+        "id": 1,
+        "node_id": "node-1",
+        "agent_id": "agent-1",
+        "type": "filebeat",
+        "version": "1.0.0",
+        "status": "running",
+        "config": "{}",
+        "pid": 12345,
+        "last_heartbeat": "2025-01-27T10:00:00Z",
+        "last_sync_time": "2025-01-27T10:00:00Z",
+        "created_at": "2025-01-27T09:00:00Z",
+        "updated_at": "2025-01-27T10:00:00Z"
+      }
+    ],
+    "count": 1
+  },
+  "timestamp": "2025-01-27T10:00:00Z"
+}
+```
+
+**响应字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| agents | array | Agent 列表 |
+| agents[].id | int | Agent 数据库ID |
+| agents[].node_id | string | 节点ID |
+| agents[].agent_id | string | Agent 唯一标识符 |
+| agents[].type | string | Agent 类型(filebeat/telegraf等) |
+| agents[].version | string | Agent 版本号 |
+| agents[].status | string | 运行状态(running/stopped/error/starting/stopping) |
+| agents[].config | string | Agent 配置(JSON格式) |
+| agents[].pid | int | 进程ID(0表示未运行) |
+| agents[].last_heartbeat | string | 最后心跳时间(ISO8601格式) |
+| agents[].last_sync_time | string | 最后同步时间(ISO8601格式) |
+| agents[].created_at | string | 创建时间(ISO8601格式) |
+| agents[].updated_at | string | 更新时间(ISO8601格式) |
+| count | int | Agent 数量 |
+
+**错误响应**:
+- 400: 节点ID为空 (错误码 1001)
+- 401: Token 无效或过期 (错误码 1002)
+- 404: 节点不存在 (错误码 2001)
+- 500: 数据库错误 (错误码 5002)
+
+**示例 curl**:
+```bash
+curl -X GET "http://localhost:8080/api/v1/nodes/node-1/agents" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+#### 4.5.2 操作Agent(启动/停止/重启)
+
+**接口**: `POST /api/v1/nodes/:node_id/agents/:agent_id/operate`
+
+**描述**: 操作指定节点下的 Agent(启动/停止/重启)
+
+**权限**: 需要认证
+
+**请求头**:
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**路径参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 是 | 节点唯一标识符 |
+| agent_id | string | 是 | Agent 唯一标识符 |
+
+**请求体**:
+```json
+{
+  "operation": "start"
+}
+```
+
+**请求参数说明**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| operation | string | 是 | 操作类型，可选值：`start`(启动)、`stop`(停止)、`restart`(重启) |
+
+**成功响应** (200):
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "message": "操作成功"
+  },
+  "timestamp": "2025-01-27T10:00:00Z"
+}
+```
+
+**错误响应**:
+- 400: 参数错误(节点ID/Agent ID为空,或无效的操作类型) (错误码 1001)
+- 401: Token 无效或过期 (错误码 1002)
+- 404: 节点不存在 (错误码 2001)
+- 404: Agent不存在 (错误码 3001)
+- 500: gRPC连接错误或操作失败 (错误码 5001)
+
+**示例 curl**:
+```bash
+# 启动Agent
+curl -X POST "http://localhost:8080/api/v1/nodes/node-1/agents/agent-1/operate" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operation": "start"
+  }'
+
+# 停止Agent
+curl -X POST "http://localhost:8080/api/v1/nodes/node-1/agents/agent-1/operate" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operation": "stop"
+  }'
+
+# 重启Agent
+curl -X POST "http://localhost:8080/api/v1/nodes/node-1/agents/agent-1/operate" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operation": "restart"
+  }'
+```
+
+---
+
+#### 4.5.3 手动同步Agent状态
+
+**接口**: `POST /api/v1/nodes/:node_id/agents/sync`
+
+**描述**: 手动触发从 Daemon 同步 Agent 状态到数据库。
+
+**使用场景**: 
+- 前端需要获取最新的 Agent 实时状态时
+- Daemon 心跳上报延迟，需要立即获取状态时
+- 排查问题时需要确认 Agent 实际状态
+
+**权限**: 需要认证
+
+**请求头**:
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**路径参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 是 | 节点唯一标识符 |
+
+**成功响应** (200):
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "message": "同步成功",
+    "synced_count": 3
+  },
+  "timestamp": "2025-01-27T10:00:00Z"
+}
+```
+
+**响应字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| message | string | 操作结果消息 |
+| synced_count | int | 同步的 Agent 数量 |
+
+**错误响应**:
+- 400: 节点ID为空 (错误码 1001)
+- 401: Token 无效或过期 (错误码 1002)
+- 404: 节点不存在 (错误码 2001)
+- 500: gRPC连接错误或同步失败 (错误码 5001)
+
+**示例 curl**:
+```bash
+curl -X POST "http://localhost:8080/api/v1/nodes/node-1/agents/sync" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json"
+```
+
+**架构说明**:
+
+正常情况下，Agent 状态通过以下方式更新：
+1. **定时心跳**: Daemon 每 30 秒向 Manager 上报所有 Agent 状态
+2. **操作后更新**: Agent 操作（启动/停止/重启）成功后，立即更新数据库中的预期状态
+
+此接口用于**手动触发同步**，直接从 Daemon 获取最新状态并更新数据库，适用于需要立即获取准确状态的场景。
+
+---
+
+#### 4.5.4 获取Agent日志
+
+**接口**: `GET /api/v1/nodes/:node_id/agents/:agent_id/logs`
+
+**描述**: 获取指定 Agent 的日志
+
+**权限**: 需要认证
+
+**请求头**:
+```
+Authorization: Bearer <token>
+```
+
+**路径参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 是 | 节点唯一标识符 |
+| agent_id | string | 是 | Agent 唯一标识符 |
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| lines | int | 否 | 100 | 日志行数，最大 1000 |
+
+**成功响应** (200):
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "logs": [
+      "2025-01-27T10:00:00Z [INFO] Agent started",
+      "2025-01-27T10:00:01Z [INFO] Configuration loaded"
+    ],
+    "count": 2
+  },
+  "timestamp": "2025-01-27T10:00:00Z"
+}
+```
+
+**响应字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| logs | array | 日志行列表(字符串数组) |
+| count | int | 日志行数 |
+
+**错误响应**:
+- 400: 参数错误(节点ID/Agent ID为空,或无效的行数) (错误码 1001)
+- 401: Token 无效或过期 (错误码 1002)
+- 404: 节点不存在 (错误码 2001)
+- 404: Agent不存在 (错误码 3001)
+- 501: 功能未实现(当前状态) (错误码 3004)
+
+**说明**:
+- 当前此功能尚未实现，调用时会返回 501 错误码
+- 未来实现后，将返回实际的日志内容
+
+**示例 curl**:
+```bash
+# 获取默认100行日志
+curl -X GET "http://localhost:8080/api/v1/nodes/node-1/agents/agent-1/logs" \
+  -H "Authorization: Bearer <token>"
+
+# 获取指定行数日志(最多1000行)
+curl -X GET "http://localhost:8080/api/v1/nodes/node-1/agents/agent-1/logs?lines=200" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### 4.6 监控指标接口
 
 监控指标接口提供节点资源使用情况的查询功能，支持实时指标、历史趋势和统计聚合查询。所有接口需要 JWT Token 认证，使用 `Authorization: Bearer <token>` header。
 

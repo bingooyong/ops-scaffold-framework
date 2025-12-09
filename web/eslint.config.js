@@ -20,4 +20,13 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // 放宽测试文件的规则
+    files: ['**/*.test.{ts,tsx}', '**/__tests__/**/*.{ts,tsx}', '**/test/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn', // 测试文件中允许 any
+      '@typescript-eslint/no-unused-vars': 'warn', // 测试文件中未使用变量警告即可
+      'react-refresh/only-export-components': 'off', // 测试工具文件可以导出非组件
+    },
+  },
 ])

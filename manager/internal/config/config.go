@@ -16,6 +16,7 @@ type Config struct {
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	Log      LogConfig      `mapstructure:"log"`
 	Metrics  MetricsConfig  `mapstructure:"metrics"`
+	Node     NodeConfig     `mapstructure:"node"`
 }
 
 // ServerConfig HTTP服务配置
@@ -80,8 +81,14 @@ type LogConfig struct {
 
 // MetricsConfig 监控指标配置
 type MetricsConfig struct {
-	RetentionDays  int    `mapstructure:"retention_days"`  // 数据保留天数，默认 30 天
+	RetentionDays   int    `mapstructure:"retention_days"`   // 数据保留天数，默认 30 天
 	CleanupSchedule string `mapstructure:"cleanup_schedule"` // 清理任务调度，默认 "0 2 * * *"（每天凌晨 2 点）
+}
+
+// NodeConfig 节点配置
+type NodeConfig struct {
+	OfflineDurationMinutes int    `mapstructure:"offline_duration_minutes"` // 离线判定时长（分钟），默认 3 分钟
+	OfflineCheckSchedule   string `mapstructure:"offline_check_schedule"`   // 离线检查调度，默认 "*/1 * * * *"（每分钟检查一次）
 }
 
 // Load 加载配置文件
@@ -200,6 +207,14 @@ func setDefaults(config *Config) {
 	}
 	if config.Metrics.CleanupSchedule == "" {
 		config.Metrics.CleanupSchedule = "0 2 * * *" // 每天凌晨 2 点
+	}
+
+	// Node 默认值
+	if config.Node.OfflineDurationMinutes == 0 {
+		config.Node.OfflineDurationMinutes = 3 // 默认 3 分钟认为离线
+	}
+	if config.Node.OfflineCheckSchedule == "" {
+		config.Node.OfflineCheckSchedule = "*/1 * * * *" // 默认每分钟检查一次
 	}
 }
 

@@ -14,19 +14,25 @@ type Agent struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// NodeID 节点ID(外键关联到nodes表)
-	NodeID string `gorm:"index;size:50;not null" json:"node_id"`
+	NodeID string `gorm:"index:idx_node_agent;size:50;not null" json:"node_id"`
 
 	// AgentID Agent唯一标识符(在节点内唯一)
-	AgentID string `gorm:"index;size:100;not null" json:"agent_id"`
+	AgentID string `gorm:"index:idx_node_agent;size:100;not null" json:"agent_id"`
 
 	// Type Agent类型(filebeat/telegraf/node_exporter等)
 	Type string `gorm:"size:50" json:"type"`
 
+	// Version Agent版本号
+	Version string `gorm:"size:50" json:"version"`
+
 	// Status 运行状态(running/stopped/error/starting/stopping)
-	Status string `gorm:"size:20;not null;default:'stopped'" json:"status"`
+	Status string `gorm:"index:idx_status;size:20;not null;default:'stopped'" json:"status"`
+
+	// Config Agent配置(JSON格式)
+	Config string `gorm:"type:text" json:"config"`
 
 	// PID 进程ID(0表示未运行)
-	PID int `gorm:"default:0" json:"pid"`
+	PID int `gorm:"column:pid;default:0" json:"pid"`
 
 	// LastHeartbeat 最后心跳时间
 	LastHeartbeat *time.Time `json:"last_heartbeat"`

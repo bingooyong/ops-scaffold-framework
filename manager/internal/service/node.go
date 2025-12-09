@@ -165,6 +165,41 @@ func (s *nodeService) UpdateStatus(ctx context.Context, nodeID string, status st
 
 // Heartbeat 心跳处理
 func (s *nodeService) Heartbeat(ctx context.Context, nodeID string) error {
+	// 检查节点是否存在
+	node, err := s.nodeRepo.GetByNodeID(ctx, nodeID)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// 节点不存在，自动注册节点
+			s.logger.Info("node not found during heartbeat, auto-registering", zap.String("node_id", nodeID))
+
+			now := time.Now()
+			newNode := &model.Node{
+				NodeID:        nodeID,
+				Hostname:      "unknown", // 心跳时无法获取主机名，使用默认值
+				IP:            "unknown", // 心跳时无法获取IP，使用默认值
+				OS:            "unknown",
+				Arch:          "unknown",
+				Labels:        make(map[string]string),
+				DaemonVersion: "unknown",
+				AgentVersion:  "unknown",
+				Status:        "online",
+				RegisterAt:    now,
+				LastSeenAt:    &now,
+			}
+
+			if err := s.nodeRepo.Create(ctx, newNode); err != nil {
+				s.logger.Error("failed to auto-register node during heartbeat", zap.Error(err))
+				return errors.Wrap(errors.ErrDatabase, "自动注册节点失败", err)
+			}
+
+			s.logger.Info("node auto-registered during heartbeat", zap.String("node_id", nodeID))
+			return nil
+		}
+
+		s.logger.Error("failed to get node", zap.Error(err))
+		return errors.Wrap(errors.ErrDatabase, "查询节点失败", err)
+	}
+
 	// 更新心跳时间
 	if err := s.nodeRepo.UpdateHeartbeat(ctx, nodeID); err != nil {
 		s.logger.Error("failed to update heartbeat", zap.Error(err))
@@ -172,12 +207,6 @@ func (s *nodeService) Heartbeat(ctx context.Context, nodeID string) error {
 	}
 
 	// 如果节点之前是离线状态，更新为在线
-	node, err := s.nodeRepo.GetByNodeID(ctx, nodeID)
-	if err != nil {
-		s.logger.Warn("failed to get node for status check", zap.Error(err))
-		return nil
-	}
-
 	if node.Status == "offline" {
 		if err := s.nodeRepo.UpdateStatus(ctx, nodeID, "online"); err != nil {
 			s.logger.Warn("failed to update node status to online", zap.Error(err))

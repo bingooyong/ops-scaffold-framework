@@ -13,15 +13,15 @@ import (
 
 // HealthChecker Agent健康检查器
 type HealthChecker struct {
-	config         *config.HealthCheckConfig
-	manager        *Manager
-	heartbeatCh    chan *types.Heartbeat
-	lastHeartbeat  time.Time
-	mu             sync.RWMutex
-	logger         *zap.Logger
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
+	config        *config.HealthCheckConfig
+	manager       *Manager
+	heartbeatCh   chan *types.Heartbeat
+	lastHeartbeat time.Time
+	mu            sync.RWMutex
+	logger        *zap.Logger
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
 }
 
 // NewHealthChecker 创建健康检查器
@@ -30,7 +30,7 @@ func NewHealthChecker(cfg *config.HealthCheckConfig, manager *Manager, logger *z
 	return &HealthChecker{
 		config:      cfg,
 		manager:     manager,
-		heartbeatCh: make(chan *types.Heartbeat, 10),
+		heartbeatCh: make(chan *types.Heartbeat, 1000), // 增加缓冲区大小以处理突发心跳
 		logger:      logger,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -79,7 +79,9 @@ func (h *HealthChecker) checkLoop() {
 			return
 
 		case hb := <-h.heartbeatCh:
-			h.processHeartbeat(hb)
+			// 批量处理所有待处理的心跳，只保留最新的时间戳
+			latestHB := h.processBatchedHeartbeats(hb)
+			h.processHeartbeat(latestHB)
 
 		case <-ticker.C:
 			status := h.checkHealth()
@@ -127,6 +129,33 @@ func (h *HealthChecker) checkLoop() {
 					}
 				}
 			}
+		}
+	}
+}
+
+// processBatchedHeartbeats 批量处理待处理的心跳，返回最新的心跳
+// 由于我们只关心最新的心跳时间戳，所以可以丢弃旧的心跳
+func (h *HealthChecker) processBatchedHeartbeats(firstHB *types.Heartbeat) *types.Heartbeat {
+	latestHB := firstHB
+	processed := 1
+
+	// 非阻塞地处理所有待处理的心跳
+	for {
+		select {
+		case nextHB := <-h.heartbeatCh:
+			processed++
+			// 只保留最新的心跳时间戳
+			if nextHB.Timestamp.After(latestHB.Timestamp) {
+				latestHB = nextHB
+			}
+		default:
+			// 没有更多待处理的心跳
+			if processed > 1 {
+				h.logger.Debug("processed batched heartbeats",
+					zap.Int("count", processed),
+					zap.Time("latest_timestamp", latestHB.Timestamp))
+			}
+			return latestHB
 		}
 	}
 }

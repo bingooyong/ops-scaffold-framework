@@ -119,6 +119,16 @@ Base URL: `http://localhost:8080/api/v1`
 - `GET /nodes/:id/metrics` - Get node metrics
 - `GET /nodes/statistics` - Get node statistics
 
+**Agents** (NEW):
+- `GET /agents` - List agents (with filtering by node_id, type, status)
+- `GET /agents/:id` - Get agent details
+- `PUT /agents/:id` - Update agent configuration
+- `DELETE /agents/:id` - Delete agent
+- `POST /agents/:id/start` - Start agent
+- `POST /agents/:id/stop` - Stop agent
+- `POST /agents/:id/restart` - Restart agent
+- `GET /nodes/:node_id/agents` - List agents on a specific node
+
 **Versions**:
 - `GET /versions` - List versions
 - `POST /versions` - Upload version
@@ -136,15 +146,18 @@ Base URL: `http://localhost:8080/api/v1`
 Service: `ops.daemon.DaemonService`
 
 **Methods**:
-- `Register(RegisterRequest) returns (RegisterResponse)`
-- `Heartbeat(HeartbeatRequest) returns (HeartbeatResponse)`
-- `ReportMetrics(ReportMetricsRequest) returns (ReportMetricsResponse)`
+- `Register(RegisterRequest) returns (RegisterResponse)` - Node registration
+- `Heartbeat(HeartbeatRequest) returns (HeartbeatResponse)` - Heartbeat reporting
+- `ReportMetrics(ReportMetricsRequest) returns (ReportMetricsResponse)` - Metrics reporting
+- `SyncAgents(SyncAgentsRequest) returns (SyncAgentsResponse)` - Agent list synchronization (NEW)
 
 ### Agent HTTP API
 
-Base URL: `http://localhost:8080/api/v1` (configurable)
+Base URL: Configurable (e.g., `http://localhost:8080/api/v1`)
 
-**Endpoints**:
+**Note**: Third-party agents (filebeat, telegraf, node_exporter) may have different API structures or no HTTP API at all.
+
+**Generic Endpoints** (if supported):
 - `GET /health` - Health check (no auth)
 - `GET /status` - Agent status
 - `POST /task/execute` - Execute task
@@ -152,6 +165,11 @@ Base URL: `http://localhost:8080/api/v1` (configurable)
 - `POST /task/:id/cancel` - Cancel task
 - `POST /file/upload` - Upload file
 - `GET /file/download` - Download file
+
+**Third-party Agent Specific**:
+- Node Exporter: `GET /metrics` (Prometheus format)
+- Filebeat: No HTTP API (managed via Daemon)
+- Telegraf: No HTTP API (managed via Daemon)
 
 ## Request/Response Examples
 

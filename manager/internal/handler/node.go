@@ -70,7 +70,11 @@ func (h *NodeHandler) List(c *gin.Context) {
 
 // Get 获取节点详情
 func (h *NodeHandler) Get(c *gin.Context) {
-	nodeID := c.Param("id")
+	// 支持两种参数名：node_id（新）和 id（向后兼容）
+	nodeID := c.Param("node_id")
+	if nodeID == "" {
+		nodeID = c.Param("id") // 向后兼容
+	}
 	if nodeID == "" {
 		response.BadRequest(c, "节点ID不能为空")
 		return

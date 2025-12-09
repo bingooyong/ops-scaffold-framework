@@ -6,28 +6,35 @@ description: React frontend coding standards and conventions for the web module
 
 ## Technology Stack
 
-- **Framework**: React 18.2+ with TypeScript 5.0+
-- **Build Tool**: Vite 7.2+
-- **UI Library**: Material-UI (MUI) 7.3+
+- **Framework**: React 19.2 with TypeScript 5.9.3
+- **Build Tool**: Vite 7.2
+- **UI Library**: Material-UI (MUI) 7.3
 - **State Management**: Zustand 5.0 (client state) + React Query 5.90 (server state)
 - **Routing**: React Router v7.10
 - **HTTP Client**: Axios v1.13
-- **Charts**: Apache ECharts 5.4+ (via echarts-for-react)
+- **Charts**: Apache ECharts 6.0 (via echarts-for-react)
 
 ## Project Structure
 
 ```
 web/src/
 ├── api/              # API layer (Axios client, interceptors, API functions)
+│   ├── index.ts      # Axios instance, request/response interceptors
+│   ├── agents.ts     # Agent management API (NEW)
+│   ├── nodes.ts      # Node management API
+│   ├── tasks.ts      # Task management API
+│   └── auth.ts       # Authentication API
 ├── components/       # Reusable components
 │   ├── Layout/      # Layout components (MainLayout, Sidebar, Header)
-│   ├── Charts/      # Chart components
+│   ├── Charts/      # Chart components (ECharts wrappers)
 │   ├── Table/       # Table components
 │   └── Common/      # Common UI components
-├── pages/           # Page components (Dashboard, Nodes, Tasks, etc.)
-├── hooks/           # Custom React hooks
+├── pages/           # Page components (Dashboard, Nodes, Tasks, Agents, etc.)
+├── hooks/           # Custom React hooks (useAuth, useNodes, useAgents, etc.)
 ├── stores/          # Zustand stores (auth, user, config)
 ├── types/           # TypeScript type definitions
+│   ├── index.ts     # Common types (Node, Metrics, Task, etc.)
+│   └── agent.ts     # Agent types (NEW)
 ├── utils/           # Utility functions
 ├── theme/           # MUI theme configuration
 └── router/          # Route configuration
@@ -103,9 +110,37 @@ export default function ComponentName({ title, onSubmit }: ComponentProps) {
 - **Strict mode**: Enabled in `tsconfig.json`
 - **No `any`**: Use specific types or `unknown`
 - **Type imports**: Use `import type` for type-only imports
-- **Interfaces**: Use for object types
-- **Enums**: Use for constants
+- **Interfaces**: Use for object types (e.g., `Node`, `Agent`, `Metrics`)
+- **Enums**: Use for constants (e.g., `AgentStatus`, `NodeStatus`)
 - **Types**: Use for unions/intersections
+
+**Key Type Definitions**:
+```typescript
+// types/agent.ts (NEW)
+export interface Agent {
+  id: number;
+  node_id: string;
+  agent_id: string;
+  type: string; // 'filebeat' | 'telegraf' | 'node_exporter' | 'custom'
+  version: string;
+  status: AgentStatus;
+  config: string;
+  pid: number;
+  last_heartbeat?: string;
+  last_sync_time: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export enum AgentStatus {
+  Stopped = 'stopped',
+  Starting = 'starting',
+  Running = 'running',
+  Stopping = 'stopping',
+  Restarting = 'restarting',
+  Failed = 'failed',
+}
+```
 
 ### File Naming
 
@@ -164,6 +199,8 @@ const { data, isLoading, error } = useQuery({
   - `/login` → Login (public)
   - `/nodes` → Node list
   - `/nodes/:id` → Node detail
+  - `/agents` → Agent list (NEW)
+  - `/agents/:id` → Agent detail (NEW)
   - `/tasks` → Task list
 
 ## Authentication

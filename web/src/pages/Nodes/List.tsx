@@ -144,8 +144,8 @@ export default function NodeList() {
                       />
                     </TableCell>
                     <TableCell>
-                      {node.last_heartbeat_at
-                        ? formatDateTime(node.last_heartbeat_at)
+                      {node.last_seen_at
+                        ? formatDateTime(node.last_seen_at)
                         : '-'}
                     </TableCell>
                     <TableCell>

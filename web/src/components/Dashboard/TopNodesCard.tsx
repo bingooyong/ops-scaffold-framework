@@ -78,7 +78,7 @@ export default function TopNodesCard({ nodes, loading = false }: TopNodesCardPro
   };
 
   return (
-    <Card elevation={2}>
+    <Card elevation={2} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <CardHeader
         title="Top 5 资源使用节点"
         action={
@@ -100,7 +100,7 @@ export default function TopNodesCard({ nodes, loading = false }: TopNodesCardPro
           </ToggleButtonGroup>
         }
       />
-      <CardContent>
+      <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 200 }}>
         {loading ? (
           // Loading 状态：显示 5 个 Skeleton
           <List>
@@ -120,9 +120,11 @@ export default function TopNodesCard({ nodes, loading = false }: TopNodesCardPro
           </List>
         ) : topNodes.length === 0 ? (
           // 空数据状态
-          <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 4 }}>
-            暂无节点数据
-          </Typography>
+          <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Typography variant="body2" color="text.secondary" align="center">
+              暂无节点数据
+            </Typography>
+          </Box>
         ) : (
           // 节点列表
           <List>
@@ -134,9 +136,9 @@ export default function TopNodesCard({ nodes, loading = false }: TopNodesCardPro
               return (
                 <Box key={node.node_id}>
                   <ListItem
-                    button
                     onClick={() => navigate(`/nodes/${node.node_id}`)}
                     sx={{
+                      cursor: 'pointer',
                       '&:hover': {
                         backgroundColor: 'action.hover',
                       },

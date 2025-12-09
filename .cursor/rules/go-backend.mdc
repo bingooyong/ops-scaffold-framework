@@ -8,8 +8,8 @@ description: Go backend coding standards and conventions for Manager and Daemon 
 
 This project uses **multi-module structure** with independent `go.mod` files:
 
-- **Manager module**: `manager/go.mod` (module: `github.com/bingooyong/ops-scaffold-framework/manager`)
-- **Daemon module**: `daemon/go.mod` (module: `github.com/bingooyong/ops-scaffold-framework/daemon`)
+- **Manager module**: `manager/go.mod` (module: `github.com/bingooyong/ops-scaffold-framework/manager`, Go 1.24.0)
+- **Daemon module**: `daemon/go.mod` (module: `github.com/bingooyong/ops-scaffold-framework/daemon`, Go 1.24.0)
 
 ## Architecture Pattern
 
@@ -28,14 +28,20 @@ Handler Layer → Service Layer → Repository Layer → Model Layer
 - `internal/grpc/` - gRPC server implementation
 - `pkg/` - Public packages (response, errors, utils)
 
-### Daemon (Modular Architecture)
+### Daemon (Multi-Agent Management Architecture)
 
 **Core modules**:
 - `internal/collector/` - System resource collectors (CPU, memory, disk, network)
-- `internal/agent/` - Agent process lifecycle management
-- `internal/comm/` - Communication layer (gRPC client)
+- `internal/agent/` - **Multi-Agent management** (Registry, MultiManager, Instance, HealthChecker, Heartbeat)
+  - `registry.go` - AgentRegistry: Centralized agent instance registry
+  - `multi_manager.go` - MultiAgentManager: Orchestrates multiple agent instances
+  - `instance.go` - AgentInstance: Manages single agent process lifecycle
+  - `health.go` - HealthChecker: Per-agent health monitoring
+  - `heartbeat.go` - HeartbeatReceiver: Agent heartbeat handling
+- `internal/comm/` - Communication layer (gRPC client to Manager)
 - `internal/daemon/` - Core daemon logic
-- `internal/config/` - Configuration management
+- `internal/config/` - Configuration management (supports agents array)
+- `internal/grpc/` - gRPC server implementation
 - `internal/logger/` - Logging
 
 ## Coding Standards
@@ -87,11 +93,43 @@ All HTTP responses must use unified format from `pkg/response/response.go`:
 
 ## Key Design Patterns
 
+### Multi-Agent Management (Daemon)
+
+**Architecture**: AgentRegistry + MultiAgentManager + AgentInstance
+
+**AgentRegistry**:
+- Centralized registry for all agent instances on a host
+- Concurrent-safe with `sync.RWMutex`
+- Methods: `Register()`, `Get()`, `Unregister()`, `List()`, `ListByType()`, `Exists()`, `Count()`
+
+**AgentInfo**: Metadata for each agent
+- ID, Type (filebeat/telegraf/node_exporter/custom), Name
+- BinaryPath, ConfigFile, WorkDir, SocketPath
+- PID, Status (stopped/starting/running/stopping/restarting/failed)
+- RestartCount, LastRestart, CreatedAt, UpdatedAt
+
+**MultiAgentManager**:
+- Manages multiple agent instances using AgentRegistry
+- Batch operations: `StartAll()`, `StopAll()`, `RestartAll()`
+- Single agent operations: `StartAgent(id)`, `StopAgent(id)`, `RestartAgent(id)`
+- Loads agents from YAML `agents:` array configuration
+
+**AgentInstance**:
+- Manages single agent process lifecycle
+- Type-aware startup args generation (filebeat uses `-c`, node_exporter uses `--web.listen-address`)
+- Independent work directories and log files per agent
+
+**Configuration**:
+- `agents:` array in `daemon.yaml` with per-agent config
+- `agent_defaults:` for global defaults (health_check, restart policy)
+- Backward compatible with legacy single-agent `agent:` config
+
 ### Process Isolation
 
-- **Agent must run as independent process**, not as Daemon subprocess
-- Daemon exit does not affect Agent
-- Agent exceptions trigger Daemon auto-restart with backoff strategy
+- **Third-party agents run as independent processes**, not as Daemon subprocess
+- Daemon exit does not affect running agents
+- Agent exceptions trigger Daemon auto-restart with exponential backoff strategy
+- Each agent has isolated work directory, config file, socket path (if applicable)
 
 ### Version Update Security
 
@@ -115,12 +153,22 @@ All update packages must pass:
 - Proto definitions in `pkg/proto/` directory
 - Generate code: `make proto` or `protoc` commands
 
-## Database
+## Database (Manager)
 
 - Use GORM with MySQL 8.0+
 - Auto-migrate on startup
 - Connection pool: MaxOpen=100, MaxIdle=10
 - Use transactions for multi-step operations
+
+**Key Tables**:
+- `nodes`: Node metadata (node_id, hostname, ip, status)
+- `agents`: Agent registry (node_id, agent_id, type, version, status, config, pid, last_heartbeat)
+  - Unique index: `idx_node_agent` on (node_id, agent_id)
+- `metrics`: Time-series metrics data (partitioned by date)
+- `versions`: Version metadata for updates
+- `tasks`: Task definitions and execution records
+- `users`: User accounts (bcrypt password hashing)
+- `audit_logs`: Audit trail for operations
 
 ## Security
 

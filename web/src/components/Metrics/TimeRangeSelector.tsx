@@ -2,7 +2,7 @@
  * 时间范围选择器组件
  */
 
-import { useState, memo } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import {
   ToggleButton,
   ToggleButtonGroup,
@@ -36,18 +36,13 @@ function TimeRangeSelector({
   const [customEndTime, setCustomEndTime] = useState<Date | null>(value.endTime);
   const [error, setError] = useState<string | null>(null);
 
-  // 计算当前选中的预设值
-  const getCurrentPreset = (): PresetValue => {
-    const now = Date.now();
+  // 计算当前选中的预设值（仅基于时间差，不检查当前时间）
+  const calculatePreset = useMemo((): PresetValue => {
     const start = value.startTime.getTime();
     const end = value.endTime.getTime();
     const diff = end - start;
 
-    // 允许 1 秒的误差
-    if (Math.abs(end - now) > 1000) {
-      return null; // 不是预设值
-    }
-
+    // 检查时间差是否匹配预设值（允许 1 秒的误差）
     if (Math.abs(diff - 15 * 60 * 1000) < 1000) return '15m';
     if (Math.abs(diff - 30 * 60 * 1000) < 1000) return '30m';
     if (Math.abs(diff - 60 * 60 * 1000) < 1000) return '1h';
@@ -56,9 +51,14 @@ function TimeRangeSelector({
     if (Math.abs(diff - 30 * 24 * 60 * 60 * 1000) < 1000) return '30d';
 
     return null;
-  };
+  }, [value.startTime, value.endTime]);
 
-  const [selectedPreset, setSelectedPreset] = useState<PresetValue>(getCurrentPreset());
+  const [selectedPreset, setSelectedPreset] = useState<PresetValue>(calculatePreset);
+
+  // 当 value 变化时，更新预设值
+  useEffect(() => {
+    setSelectedPreset(calculatePreset);
+  }, [calculatePreset]);
 
   // 处理预设值选择
   const handlePresetChange = (

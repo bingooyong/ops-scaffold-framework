@@ -98,7 +98,7 @@ func NewHTTPHeartbeatReceiver(
 		multiManager: multiManager,
 		registry:     registry,
 		logger:       logger,
-		workerPool:   make(chan *Heartbeat, workerCount*10), // channel容量为worker数量的10倍
+		workerPool:   make(chan *Heartbeat, workerCount*100), // channel容量为worker数量的100倍,防止心跳丢失
 		workerCount:  workerCount,
 		stopCh:       make(chan struct{}),
 	}

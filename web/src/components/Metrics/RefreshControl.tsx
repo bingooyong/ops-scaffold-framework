@@ -2,7 +2,7 @@
  * 刷新控制组件
  */
 
-import { useState, useEffect, memo } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import {
   ToggleButton,
   ToggleButtonGroup,
@@ -23,17 +23,23 @@ function RefreshControl({
   onChange,
   onRefresh,
 }: RefreshControlProps) {
-  const [countdown, setCountdown] = useState<number | null>(null);
+  // 计算初始倒计时值
+  const initialCountdown = useMemo(() => {
+    return value === null ? null : Math.floor(value / 1000);
+  }, [value]);
+
+  const [countdown, setCountdown] = useState<number | null>(initialCountdown);
+
+  // 当 value 变化时，更新倒计时
+  useEffect(() => {
+    setCountdown(initialCountdown);
+  }, [initialCountdown]);
 
   // 倒计时逻辑
   useEffect(() => {
-    if (value === null) {
-      setCountdown(null);
+    if (value === null || countdown === null) {
       return;
     }
-
-    // 初始化倒计时
-    setCountdown(Math.floor(value / 1000));
 
     const interval = setInterval(() => {
       setCountdown((prev) => {
@@ -50,25 +56,25 @@ function RefreshControl({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [value, onRefresh]);
+  }, [value, countdown, onRefresh]);
 
   const handleChange = (
     _event: React.MouseEvent<HTMLElement>,
     newValue: number | null
   ) => {
-    onChange(newValue);
+    onChange(newValue === 0 ? null : newValue);
   };
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       <ToggleButtonGroup
-        value={value}
+        value={value === null ? 0 : value}
         exclusive
         onChange={handleChange}
         aria-label="刷新间隔选择"
         size="small"
       >
-        <ToggleButton value={null} aria-label="暂停">
+        <ToggleButton value={0} aria-label="暂停">
           <PauseIcon sx={{ mr: 0.5 }} fontSize="small" />
           暂停
         </ToggleButton>

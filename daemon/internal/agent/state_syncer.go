@@ -15,6 +15,8 @@ type AgentState struct {
 	Status        AgentStatus
 	PID           int
 	LastHeartbeat time.Time
+	Type          string // Agent类型(filebeat/telegraf/node_exporter等)
+	Version       string // Agent版本号
 }
 
 // StateSyncer Agent状态同步器
@@ -95,18 +97,43 @@ func (ss *StateSyncer) OnAgentStateChange(agentID string, status AgentStatus, pi
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
+	// 如果Status是空的（零值），使用默认值"stopped"
+	if status == "" {
+		status = StatusStopped
+		ss.logger.Warn("agent status is empty in state change callback, using default 'stopped'",
+			zap.String("agent_id", agentID))
+	}
+
+	// 获取Agent信息以获取Type
+	var agentType string
+	var version string
+	instance := ss.multiManager.GetAgent(agentID)
+	if instance != nil {
+		info := instance.GetInfo()
+		agentType = string(info.Type)
+		// 从metadata获取Version
+		metadata, err := ss.multiManager.GetAgentMetadata(agentID)
+		if err == nil && metadata != nil {
+			version = metadata.Version
+		}
+	}
+
 	// 创建或更新待同步状态
 	ss.pendingStates[agentID] = &AgentState{
 		AgentID:       agentID,
 		Status:        status,
 		PID:           pid,
 		LastHeartbeat: lastHeartbeat,
+		Type:          agentType,
+		Version:       version,
 	}
 
 	ss.logger.Debug("agent state changed, added to pending states",
 		zap.String("agent_id", agentID),
 		zap.String("status", string(status)),
-		zap.Int("pid", pid))
+		zap.Int("pid", pid),
+		zap.String("type", agentType),
+		zap.String("version", version))
 
 	// 可选: 如果状态变化,立即触发一次同步(而不是等待定时同步)
 	// 这里不立即触发,而是等待定时同步,避免频繁同步
@@ -119,6 +146,9 @@ func (ss *StateSyncer) collectAgentStates() []*AgentState {
 
 	// 从multiManager获取所有Agent实例
 	instances := ss.multiManager.ListAgents()
+	ss.logger.Debug("collecting agent states",
+		zap.Int("total_agents", len(instances)),
+		zap.Int("pending_states", len(ss.pendingStates)))
 
 	// 构建状态映射(用于合并)
 	stateMap := make(map[string]*AgentState)
@@ -128,22 +158,62 @@ func (ss *StateSyncer) collectAgentStates() []*AgentState {
 		info := instance.GetInfo()
 		agentID := info.ID
 
-		// 从AgentInfo获取Status、PID
+		// 从AgentInfo获取Status、PID、Type
 		status := info.GetStatus()
-		pid := info.GetPID()
-
-		// 从元数据获取LastHeartbeat(如果可用)
-		var lastHeartbeat time.Time
-		metadata, err := ss.multiManager.GetAgentMetadata(agentID)
-		if err == nil && metadata != nil {
-			lastHeartbeat = metadata.LastHeartbeat
+		// 如果Status是空的（零值），使用默认值"stopped"
+		if status == "" {
+			status = StatusStopped
+			ss.logger.Warn("agent status is empty, using default 'stopped'",
+				zap.String("agent_id", agentID))
 		}
+		pid := info.GetPID()
+		agentType := string(info.Type)
+
+		// 从metadata获取Version
+		// 使用超时避免阻塞状态同步循环
+		var version string
+		// last_heartbeat 使用当前时间，代表"Daemon 最后一次报告该 Agent 状态的时间"
+		lastHeartbeat := time.Now()
+
+		type metadataResult struct {
+			metadata *AgentMetadata
+			err      error
+		}
+		metadataChan := make(chan metadataResult, 1)
+
+		go func(aid string) {
+			md, err := ss.multiManager.GetAgentMetadata(aid)
+			metadataChan <- metadataResult{metadata: md, err: err}
+		}(agentID)
+
+		select {
+		case result := <-metadataChan:
+			if result.err == nil && result.metadata != nil {
+				version = result.metadata.Version
+				// 注意：不再从 metadata 获取 lastHeartbeat
+				// lastHeartbeat 应该是 Daemon 报告状态的时间，而不是 Agent 自己的心跳时间
+			}
+		case <-time.After(100 * time.Millisecond):
+			// 超时后继续，version 使用空值，lastHeartbeat 使用当前时间
+			ss.logger.Debug("metadata read timeout in collectAgentStates",
+				zap.String("agent_id", agentID))
+		}
+
+		ss.logger.Debug("collected agent state",
+			zap.String("agent_id", agentID),
+			zap.String("status", string(status)),
+			zap.Int("pid", pid),
+			zap.String("type", agentType),
+			zap.String("version", version),
+			zap.Time("last_heartbeat", lastHeartbeat))
 
 		stateMap[agentID] = &AgentState{
 			AgentID:       agentID,
 			Status:        status,
 			PID:           pid,
 			LastHeartbeat: lastHeartbeat,
+			Type:          agentType,
+			Version:       version,
 		}
 	}
 
@@ -157,6 +227,9 @@ func (ss *StateSyncer) collectAgentStates() []*AgentState {
 	for _, state := range stateMap {
 		states = append(states, state)
 	}
+
+	ss.logger.Debug("collected agent states summary",
+		zap.Int("collected_count", len(states)))
 
 	return states
 }
@@ -243,9 +316,9 @@ func (ss *StateSyncer) syncLoop(nodeID string) {
 			// 收集所有Agent状态
 			states := ss.collectAgentStates()
 
+			// 注意:即使状态为空也进行同步,让Manager知道这个节点当前没有Agent或Agent还未就绪
 			if len(states) == 0 {
-				ss.logger.Debug("no agent states to sync")
-				continue
+				ss.logger.Debug("no agent states to sync, but syncing to update node status")
 			}
 
 			// 同步到Manager

@@ -7,37 +7,50 @@ This is a lightweight, highly available distributed operations management platfo
 
 ## Core Components
 
-The system consists of three core components:
+The system consists of four core components:
 
 1. **Manager** (Center Management Node): Web service providing global management, monitoring, and version update functionality
    - Location: `manager/` directory
    - Independent Go module: `github.com/bingooyong/ops-scaffold-framework/manager`
-   - Tech: Go 1.21+, Gin 1.10.0, GORM 1.25.5, MySQL 8.0+, gRPC
+   - Tech: Go 1.24.0, Gin 1.10.0, GORM 1.30.0, MySQL 8.0+, gRPC 1.77.0
    - Ports: HTTP API (8080), gRPC (9090)
+   - Features: Node management, Agent registry, metrics aggregation, version updates, JWT auth
 
-2. **Daemon** (Guardian Process): Runs on each managed host, responsible for resource collection, Agent management, and status reporting
+2. **Daemon** (Guardian Process): Runs on each managed host, responsible for resource collection, multi-Agent management, and status reporting
    - Location: `daemon/` directory
    - Independent Go module: `github.com/bingooyong/ops-scaffold-framework/daemon`
-   - Tech: Go 1.21+, gRPC, gopsutil v3
-   - Features: Resource monitoring, Agent lifecycle management, version updates
+   - Tech: Go 1.24.0, gRPC 1.77.0, gopsutil v3, Viper 1.18.2, Zap 1.26.0
+   - Features: **Multi-Agent management**, Resource monitoring, Agent lifecycle, version updates, gRPC client
+   - Architecture: **AgentRegistry + MultiAgentManager** (supports filebeat, telegraf, node_exporter, custom agents)
 
-3. **Agent** (Execution Process): Runs on each managed host, responsible for task execution and HTTP/HTTPS API
-   - Status: ⏳ Under development
-   - Features: Task execution, HTTP API, heartbeat reporting
+3. **Agent** (Third-party Agents): Multiple agent instances managed by Daemon, running as independent processes
+   - Status: ⏳ Integration in progress
+   - Supported Types: Filebeat (log collection), Telegraf (metrics), Node Exporter (metrics), Custom agents
+   - Management: Each agent has independent configuration, work directory, health checks, restart policies
+   - Features: Task execution, HTTP API, heartbeat reporting (if supported)
 
 4. **Web Frontend**: React-based management interface
    - Location: `web/` directory
-   - Tech: React 18.2+, Vite 7.2, MUI 7.3, Zustand 5.0, React Query 5.90
-   - Features: Dashboard, node management, task management, version management
+   - Tech: React 19.2, Vite 7.2, MUI 7.3, Zustand 5.0, React Query 5.90, Axios 1.13
+   - Features: Dashboard, node management, agent management, task management, version management, metrics visualization
 
 ## Project Structure
 
 ```
 ops-scaffold-framework/
 ├── manager/          # Manager module (independent Go module)
+│   ├── internal/     # Handler, Service, Repository, Model, gRPC server
+│   ├── pkg/proto/    # Protobuf definitions (daemon, manager)
+│   └── test/         # Integration tests with automation scripts
 ├── daemon/           # Daemon module (independent Go module)
+│   ├── internal/     # Collector, Agent (registry, multi-manager), Comm, Config
+│   ├── pkg/proto/    # Protobuf definitions (daemon, manager)
+│   └── test/         # Integration tests
 ├── web/              # Frontend React application
+│   └── src/          # API, Components, Pages, Hooks, Stores, Types
 └── docs/             # Project documentation
+    ├── api/          # API documentation
+    └── 设计文档_*.md # Design documents
 ```
 
 ## Key Documentation
@@ -45,20 +58,70 @@ ops-scaffold-framework/
 - Main project guide: [CLAUDE.md](mdc:CLAUDE.md)
 - Requirements: [docs/运维工具框架需求文档.md](mdc:docs/运维工具框架需求文档.md)
 - Design docs: `docs/设计文档_*.md`
+  - Multi-Agent architecture: [docs/设计文档_04_Daemon多Agent管理架构.md](mdc:docs/设计文档_04_Daemon多Agent管理架构.md)
 - API docs: `docs/api/`
+  - Manager API: [docs/api/Manager_API.md](mdc:docs/api/Manager_API.md)
 - Frontend standards: [docs/前端开发规范.md](mdc:docs/前端开发规范.md)
 
 ## Communication Protocols
 
-- **Manager ↔ Daemon**: gRPC over TLS (mTLS bidirectional authentication)
-- **Manager/Daemon ↔ Agent**: HTTP/HTTPS RESTful API (HMAC-SHA256 request signature)
-- **Daemon ↔ Agent (local)**: Unix Domain Socket / Named Pipe (JSON-RPC 2.0)
+- **Manager ↔ Daemon**: gRPC over TLS (mTLS bidirectional authentication, port 9090)
+- **Manager ↔ Web Frontend**: HTTP/HTTPS RESTful API (JWT authentication, port 8080)
+- **Manager ↔ Third-party Agents**: HTTP/HTTPS API (HMAC-SHA256 request signature)
+- **Daemon ↔ Third-party Agents (local)**: Unix Domain Socket / Named Pipe (JSON-RPC 2.0, if supported)
+
+## Architecture Highlights
+
+### Multi-Agent Management (Daemon)
+
+- **AgentRegistry**: Centralized registry for managing multiple agent instances
+- **AgentInfo**: Metadata for each agent (ID, Type, Status, PID, Config, WorkDir)
+- **MultiAgentManager**: Orchestrates lifecycle of multiple agents (Start, Stop, Restart, HealthCheck)
+- **Agent Types**: Filebeat, Telegraf, Node Exporter, Custom
+- **Configuration**: YAML-based with `agents:` array, supports per-agent and global defaults
+- **Health Checks**: Process monitoring, HTTP endpoint checks (e.g., Node Exporter), resource thresholds
+- **Restart Policies**: Exponential backoff, max retries, policy (always/never/on-failure)
+
+### Manager Database Schema
+
+- **nodes**: Node metadata and status
+- **agents**: Agent registry (node_id, agent_id, type, version, status, config, pid, last_heartbeat)
+- **metrics**: Time-series metrics data with partitioning
+- **versions**: Version metadata for updates
+- **tasks**: Task definitions and execution records
+- **users**: User accounts for authentication
+- **audit_logs**: Audit trail for operations
 
 ## Current Status
 
-- ✅ Manager backend: Complete (HTTP API + gRPC + Auth + Database + Tests)
-- ✅ Daemon: Complete (Resource collection + Agent management + gRPC communication)
-- ✅ Web frontend: Complete (React + Vite + MUI + Auth + Dashboard + Node management)
-- ⏳ Agent: Under development
+- ✅ Manager backend: Complete (HTTP API + gRPC + Auth + Database + Agent registry + Tests)
+- ✅ Daemon: Multi-Agent architecture design complete, implementation in progress
+  - ✅ Design: AgentRegistry, AgentInfo, MultiAgentManager architecture
+  - ✅ Configuration: `daemon.multi-agent.example.yaml` with agents array
+  - ⏳ Implementation: Tasks 1.2-1.7 (Registry, AgentInstance, MultiAgentManager, Config isolation, HealthChecker, Tests)
+- ✅ Web frontend: Complete (React + Vite + MUI + Auth + Dashboard + Node/Agent management)
+- ⏳ Agent integration: Third-party agent management in progress
 
-**Current Version**: v0.3.0
+**Current Version**: v0.3.0 (Multi-Agent architecture in development)
+
+## Technology Stack
+
+| Component | Technology | Version |
+|-----------|------------|---------|
+| Go | Go | 1.24.0 |
+| Manager Backend | Gin + GORM | 1.10.0 + 1.30.0 |
+| Daemon | gRPC + gopsutil | 1.77.0 + 3.23.12 |
+| Frontend | React + Vite + MUI | 19.2 + 7.2 + 7.3 |
+| State Management | Zustand + React Query | 5.0 + 5.90 |
+| Database | MySQL | 8.0+ |
+| Authentication | JWT + bcrypt | golang-jwt 5.2.0 |
+| Configuration | Viper | 1.18.2 |
+| Logging | Zap | 1.26.0 |
+| Protocol | gRPC + Protobuf | 1.77.0 + 1.36.10 |
+| Testing | Testify | 1.9.0 |
+
+## Development Preferences
+
+### Documentation
+
+**IMPORTANT**: Do NOT create summary/fix/analysis documentation files (e.g., `*_FIX.md`, `*_ISSUE.md`, `*_ANALYSIS.md`, `*_SUMMARY.md`) unless explicitly requested by the user. Focus on fixing code directly rather than writing documentation about the fixes.

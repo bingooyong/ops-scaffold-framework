@@ -2,6 +2,8 @@
  * 本地存储工具
  */
 
+import type { User } from '../types/user';
+
 const TOKEN_KEY = 'ops_token';
 const USER_KEY = 'ops_user';
 
@@ -20,18 +22,18 @@ export const storage = {
   },
 
   // 用户信息相关
-  getUser(): any | null {
+  getUser(): User | null {
     const userStr = localStorage.getItem(USER_KEY);
     if (!userStr) return null;
 
     try {
-      return JSON.parse(userStr);
+      return JSON.parse(userStr) as User;
     } catch {
       return null;
     }
   },
 
-  setUser(user: any): void {
+  setUser(user: User): void {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
   },
 

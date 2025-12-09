@@ -48,6 +48,10 @@ type ResourceThreshold struct {
 	// MemoryThreshold 内存占用阈值(字节)
 	MemoryThreshold uint64 `json:"memory_threshold"`
 
+	// OpenFilesThreshold 打开文件数阈值
+	// 用于检测文件描述符泄露问题
+	OpenFilesThreshold int `json:"open_files_threshold"`
+
 	// ThresholdDuration 超过阈值持续时间(触发告警/重启)
 	ThresholdDuration time.Duration `json:"threshold_duration"`
 }
@@ -141,6 +145,7 @@ func (rm *ResourceMonitor) SetThreshold(agentID string, threshold *ResourceThres
 		zap.String("agent_id", agentID),
 		zap.Float64("cpu_threshold", threshold.CPUThreshold),
 		zap.Uint64("memory_threshold", threshold.MemoryThreshold),
+		zap.Int("open_files_threshold", threshold.OpenFilesThreshold),
 		zap.Duration("threshold_duration", threshold.ThresholdDuration))
 }
 
@@ -204,20 +209,33 @@ func (rm *ResourceMonitor) collectAgentResources(agentID string) (*ResourceDataP
 		dataPoint.DiskWriteBytes = ioCounters.WriteBytes
 	}
 
-	// 打开文件数(跨平台处理)
-	// 注意: NumFDs在Windows上可能不可用,会返回错误
-	numFDs, err := proc.NumFDs()
+	// 打开文件数(使用跨平台实现)
+	// 优先使用自定义实现,失败后尝试 gopsutil 的 NumFDs
+	numFDs, err := getFDsWithFallback(int32(pid), rm.logger)
 	if err != nil {
-		// Windows平台可能不支持NumFDs,记录调试日志即可
-		if runtime.GOOS != "windows" {
-			rm.logger.Warn("failed to get num fds",
-				zap.String("agent_id", agentID),
-				zap.Int("pid", pid),
-				zap.Error(err))
+		// 尝试使用 gopsutil 的 NumFDs 作为备用
+		gopsutilFDs, gopsutilErr := proc.NumFDs()
+		if gopsutilErr != nil {
+			// 两种方法都失败,仅在非 Windows 平台记录警告
+			if runtime.GOOS != "windows" {
+				rm.logger.Warn("failed to get num fds",
+					zap.String("agent_id", agentID),
+					zap.Int("pid", pid),
+					zap.Error(err),
+					zap.NamedError("gopsutil_error", gopsutilErr))
+			}
+			// OpenFiles保持为0(默认值)
+		} else {
+			// gopsutil 方法成功
+			dataPoint.OpenFiles = int(gopsutilFDs)
 		}
-		// OpenFiles保持为0(默认值)
 	} else {
+		// 自定义跨平台方法成功
 		dataPoint.OpenFiles = int(numFDs)
+		rm.logger.Debug("successfully got num fds",
+			zap.String("agent_id", agentID),
+			zap.Int("pid", pid),
+			zap.Int32("fds", numFDs))
 	}
 
 	// 线程数(可选)
@@ -293,10 +311,19 @@ func (rm *ResourceMonitor) updateAgentResourceData(agentID string, dataPoint *Re
 			RestartCount:  0,
 			ResourceUsage: *NewResourceUsageHistory(1440),
 		}
+
+		rm.logger.Debug("created new metadata for agent",
+			zap.String("agent_id", agentID))
 	}
 
 	// 调用AddResourceData添加数据点(使用MemoryRSS作为内存指标)
 	metadata.ResourceUsage.AddResourceData(dataPoint.CPU, dataPoint.MemoryRSS)
+
+	rm.logger.Debug("added resource data point",
+		zap.String("agent_id", agentID),
+		zap.Float64("cpu", dataPoint.CPU),
+		zap.Uint64("memory_rss", dataPoint.MemoryRSS),
+		zap.Int("total_data_points", len(metadata.ResourceUsage.Timestamps)))
 
 	// 保存更新后的元数据
 	metadataStore := rm.multiManager.metadataStore
@@ -370,6 +397,30 @@ func (rm *ResourceMonitor) checkResourceThresholds(agentID string, dataPoint *Re
 	} else {
 		// 内存恢复正常,清除超阈值开始时间
 		rm.clearExceededSince(agentID, "memory")
+	}
+
+	// 检查打开文件数(文件描述符泄露检测)
+	if threshold.OpenFilesThreshold > 0 && dataPoint.OpenFiles > threshold.OpenFilesThreshold {
+		duration := rm.getExceededDuration(agentID, "open_files", now)
+		if duration >= threshold.ThresholdDuration {
+			rm.logger.Error("agent open files over threshold for too long - possible fd leak",
+				zap.String("agent_id", agentID),
+				zap.Int("open_files", dataPoint.OpenFiles),
+				zap.Int("threshold", threshold.OpenFilesThreshold),
+				zap.Duration("duration", duration),
+				zap.String("warning", "file descriptor leak detected"))
+
+			// 文件描述符泄露是严重问题,可能需要重启Agent
+		} else {
+			rm.logger.Warn("agent open files over threshold",
+				zap.String("agent_id", agentID),
+				zap.Int("open_files", dataPoint.OpenFiles),
+				zap.Int("threshold", threshold.OpenFilesThreshold),
+				zap.Duration("duration", duration))
+		}
+	} else {
+		// 打开文件数恢复正常,清除超阈值开始时间
+		rm.clearExceededSince(agentID, "open_files")
 	}
 }
 
@@ -448,35 +499,55 @@ func (rm *ResourceMonitor) GetResourceHistory(agentID string, duration time.Dura
 		return nil, fmt.Errorf("failed to get metadata: %w", err)
 	}
 
-	// 从ResourceUsageHistory中获取指定时间范围的数据
-	cpuData := metadata.ResourceUsage.GetRecentCPU(duration)
-	memoryData := metadata.ResourceUsage.GetRecentMemory(duration)
-
-	// 获取时间戳
+	// 快速复制数据,减少持锁时间
 	metadata.ResourceUsage.mu.RLock()
-	timestamps := make([]time.Time, 0)
-	cutoff := time.Now().Add(-duration)
-	for _, ts := range metadata.ResourceUsage.Timestamps {
-		if ts.After(cutoff) || ts.Equal(cutoff) {
-			timestamps = append(timestamps, ts)
-		}
+
+	// 快速检查是否有数据
+	if len(metadata.ResourceUsage.Timestamps) == 0 {
+		metadata.ResourceUsage.mu.RUnlock()
+		rm.logger.Debug("no resource history data",
+			zap.String("agent_id", agentID))
+		return []ResourceDataPoint{}, nil
 	}
+
+	// 快速复制切片(浅拷贝引用),在锁内完成
+	timestamps := make([]time.Time, len(metadata.ResourceUsage.Timestamps))
+	cpuData := make([]float64, len(metadata.ResourceUsage.CPU))
+	memData := make([]uint64, len(metadata.ResourceUsage.Memory))
+	copy(timestamps, metadata.ResourceUsage.Timestamps)
+	copy(cpuData, metadata.ResourceUsage.CPU)
+	copy(memData, metadata.ResourceUsage.Memory)
+	totalPoints := len(timestamps)
+
 	metadata.ResourceUsage.mu.RUnlock()
+	// 释放锁后处理数据
+
+	// 计算截止时间
+	cutoff := time.Now().Add(-duration)
 
 	// 构建ResourceDataPoint切片
-	result := make([]ResourceDataPoint, 0, len(timestamps))
+	result := make([]ResourceDataPoint, 0)
 	for i, ts := range timestamps {
-		if i < len(cpuData) && i < len(memoryData) {
-			result = append(result, ResourceDataPoint{
-				Timestamp:  ts,
-				CPU:        cpuData[i],
-				MemoryRSS:  memoryData[i],
-				MemoryVMS:  0, // VMS数据未在ResourceUsageHistory中存储
-				OpenFiles:  0, // 其他字段未在ResourceUsageHistory中存储
-				NumThreads: 0,
-			})
+		// 只包含在时间范围内的数据点
+		if ts.After(cutoff) || ts.Equal(cutoff) {
+			if i < len(cpuData) && i < len(memData) {
+				result = append(result, ResourceDataPoint{
+					Timestamp:  ts,
+					CPU:        cpuData[i],
+					MemoryRSS:  memData[i],
+					MemoryVMS:  0, // VMS数据未在ResourceUsageHistory中存储
+					OpenFiles:  0, // 其他字段未在ResourceUsageHistory中存储
+					NumThreads: 0,
+				})
+			}
 		}
 	}
+
+	rm.logger.Debug("retrieved resource history",
+		zap.String("agent_id", agentID),
+		zap.Duration("duration", duration),
+		zap.Int("total_data_points", totalPoints),
+		zap.Int("filtered_data_points", len(result)))
 
 	return result, nil
 }

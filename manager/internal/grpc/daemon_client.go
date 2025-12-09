@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bingooyong/ops-scaffold-framework/manager/internal/service"
 	daemonpb "github.com/bingooyong/ops-scaffold-framework/manager/pkg/proto/daemon"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -16,11 +17,18 @@ import (
 
 const (
 	// defaultTimeout 默认超时时间
-	defaultTimeout = 10 * time.Second
-	// keepaliveTime keepalive时间间隔
-	keepaliveTime = 10 * time.Second
+	defaultTimeout = 30 * time.Second
+	// operateAgentTimeout Agent操作超时时间(需要大于Agent优雅停止的30秒等待时间)
+	// 设置为90秒，避免与Daemon的60-120秒keepalive冲突，提供足够的缓冲时间
+	operateAgentTimeout = 90 * time.Second
+	// keepaliveTime keepalive时间间隔(设置为45秒，避免与操作超时冲突)
+	keepaliveTime = 45 * time.Second
 	// keepaliveTimeout keepalive超时时间
-	keepaliveTimeout = 3 * time.Second
+	keepaliveTimeout = 15 * time.Second
+	// maxMsgSize 最大消息大小(10MB)
+	maxMsgSize = 10 * 1024 * 1024
+	// initialWindowSize 初始窗口大小(1MB)
+	initialWindowSize = 1 << 20
 )
 
 // DaemonClient Daemon gRPC客户端
@@ -30,6 +38,8 @@ type DaemonClient struct {
 	address string
 	logger  *zap.Logger
 	mu      sync.RWMutex // 保护连接状态
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 // NewDaemonClient 创建Daemon gRPC客户端
@@ -48,12 +58,35 @@ func NewDaemonClient(address string, logger *zap.Logger) (*DaemonClient, error) 
 		PermitWithoutStream: true,
 	}
 
+	// 配置重试策略
+	retryPolicy := `{
+		"methodConfig": [{
+			"name": [{"service": "daemon.DaemonService"}],
+			"waitForReady": true,
+			"retryPolicy": {
+				"MaxAttempts": 3,
+				"InitialBackoff": "0.1s",
+				"MaxBackoff": "1s",
+				"BackoffMultiplier": 2.0,
+				"RetryableStatusCodes": ["UNAVAILABLE", "DEADLINE_EXCEEDED"]
+			}
+		}]
+	}`
+
 	// 创建gRPC连接
 	// 注意：根据任务说明，Daemon监听9091端口，这里使用insecure credentials，实际生产环境应使用TLS
 	conn, err := grpc.Dial(
 		address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepaliveParams),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxMsgSize),
+			grpc.MaxCallSendMsgSize(maxMsgSize),
+		),
+		grpc.WithInitialWindowSize(initialWindowSize),
+		grpc.WithInitialConnWindowSize(initialWindowSize),
+		grpc.WithUnaryInterceptor(UnaryClientInterceptor(logger)),
+		grpc.WithDefaultServiceConfig(retryPolicy),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial daemon at %s: %w", address, err)
@@ -62,12 +95,21 @@ func NewDaemonClient(address string, logger *zap.Logger) (*DaemonClient, error) 
 	// 创建客户端
 	client := daemonpb.NewDaemonServiceClient(conn)
 
-	return &DaemonClient{
+	ctx, cancel := context.WithCancel(context.Background())
+
+	dc := &DaemonClient{
 		conn:    conn,
 		client:  client,
 		address: address,
 		logger:  logger,
-	}, nil
+		ctx:     ctx,
+		cancel:  cancel,
+	}
+
+	// 启动连接状态监控
+	go dc.monitorConnection()
+
+	return dc, nil
 }
 
 // ensureConnection 确保连接可用，如果断开则尝试重连
@@ -81,9 +123,20 @@ func (c *DaemonClient) ensureConnection(ctx context.Context) error {
 		return nil
 	}
 
-	// 如果连接正在连接中，等待
+	// 如果连接正在连接中，等待（使用超时避免永久阻塞）
 	if state == connectivity.Connecting {
-		if !c.conn.WaitForStateChange(ctx, state) {
+		// 创建带超时的 context，最多等待 5 秒
+		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		
+		if !c.conn.WaitForStateChange(waitCtx, state) {
+			// 超时或 context 取消
+			if waitCtx.Err() == context.DeadlineExceeded {
+				c.logger.Warn("connection wait timeout",
+					zap.String("address", c.address),
+					zap.String("state", state.String()))
+				return fmt.Errorf("%w: connection wait timeout", ErrConnectionFailed)
+			}
 			return ErrConnectionFailed
 		}
 		state = c.conn.GetState()
@@ -105,7 +158,12 @@ func (c *DaemonClient) ensureConnection(ctx context.Context) error {
 
 		// 关闭旧连接
 		if c.conn != nil {
-			_ = c.conn.Close()
+			if err := c.conn.Close(); err != nil {
+				c.logger.Warn("failed to close old connection",
+					zap.String("address", c.address),
+					zap.Error(err))
+				// 即使关闭失败，也继续重连
+			}
 		}
 
 		// 重新创建连接
@@ -115,10 +173,39 @@ func (c *DaemonClient) ensureConnection(ctx context.Context) error {
 			PermitWithoutStream: true,
 		}
 
-		conn, err := grpc.Dial(
+		// 配置重试策略
+		retryPolicy := `{
+			"methodConfig": [{
+				"name": [{"service": "daemon.DaemonService"}],
+				"waitForReady": true,
+				"retryPolicy": {
+					"MaxAttempts": 3,
+					"InitialBackoff": "0.1s",
+					"MaxBackoff": "1s",
+					"BackoffMultiplier": 2.0,
+					"RetryableStatusCodes": ["UNAVAILABLE", "DEADLINE_EXCEEDED"]
+				}
+			}]
+		}`
+
+		// 创建带超时的context
+		dialCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		conn, err := grpc.DialContext(
+			dialCtx,
 			c.address,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithKeepaliveParams(keepaliveParams),
+			grpc.WithBlock(), // 等待连接建立
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(maxMsgSize),
+				grpc.MaxCallSendMsgSize(maxMsgSize),
+			),
+			grpc.WithInitialWindowSize(initialWindowSize),
+			grpc.WithInitialConnWindowSize(initialWindowSize),
+			grpc.WithUnaryInterceptor(UnaryClientInterceptor(c.logger)),
+			grpc.WithDefaultServiceConfig(retryPolicy),
 		)
 		if err != nil {
 			c.logger.Error("failed to reconnect to daemon",
@@ -191,8 +278,8 @@ func (c *DaemonClient) OperateAgent(ctx context.Context, nodeID, agentID, operat
 		return err
 	}
 
-	// 设置超时
-	timeoutCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	// 设置超时 (Agent操作需要更长的超时时间,因为优雅停止可能需要30秒)
+	timeoutCtx, cancel := context.WithTimeout(ctx, operateAgentTimeout)
 	defer cancel()
 
 	// 构建请求
@@ -202,13 +289,35 @@ func (c *DaemonClient) OperateAgent(ctx context.Context, nodeID, agentID, operat
 	}
 
 	// 调用gRPC方法
+	c.logger.Debug("calling daemon OperateAgent gRPC",
+		zap.String("node_id", nodeID),
+		zap.String("agent_id", agentID),
+		zap.String("operation", operation),
+		zap.String("address", c.address))
+
+	callStart := time.Now()
 	response, err := c.client.OperateAgent(timeoutCtx, req)
+	callDuration := time.Since(callStart)
+
 	if err != nil {
-		c.logger.Warn("failed to operate agent",
-			zap.String("node_id", nodeID),
-			zap.String("agent_id", agentID),
-			zap.String("operation", operation),
-			zap.Error(err))
+		// 检查是否是超时错误
+		if err == context.DeadlineExceeded || err == context.Canceled {
+			c.logger.Error("operate agent timeout or cancelled",
+				zap.String("node_id", nodeID),
+				zap.String("agent_id", agentID),
+				zap.String("operation", operation),
+				zap.String("address", c.address),
+				zap.Duration("duration", callDuration),
+				zap.Error(err))
+		} else {
+			c.logger.Error("failed to operate agent",
+				zap.String("node_id", nodeID),
+				zap.String("agent_id", agentID),
+				zap.String("operation", operation),
+				zap.String("address", c.address),
+				zap.Duration("duration", callDuration),
+				zap.Error(err))
+		}
 		return convertGRPCError(err)
 	}
 
@@ -222,6 +331,8 @@ func (c *DaemonClient) OperateAgent(ctx context.Context, nodeID, agentID, operat
 			zap.String("node_id", nodeID),
 			zap.String("agent_id", agentID),
 			zap.String("operation", operation),
+			zap.String("address", c.address),
+			zap.Duration("duration", callDuration),
 			zap.String("error", errMsg))
 		return fmt.Errorf("agent operation failed: %s", errMsg)
 	}
@@ -230,7 +341,9 @@ func (c *DaemonClient) OperateAgent(ctx context.Context, nodeID, agentID, operat
 	c.logger.Info("agent operation success",
 		zap.String("node_id", nodeID),
 		zap.String("agent_id", agentID),
-		zap.String("operation", operation))
+		zap.String("operation", operation),
+		zap.String("address", c.address),
+		zap.Duration("duration", callDuration))
 
 	return nil
 }
@@ -287,10 +400,53 @@ func (c *DaemonClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// 先取消监控goroutine
+	if c.cancel != nil {
+		c.cancel()
+	}
+
 	if c.conn != nil {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+// monitorConnection 监控连接状态变化
+func (c *DaemonClient) monitorConnection() {
+	c.mu.RLock()
+	state := c.conn.GetState()
+	c.mu.RUnlock()
+
+	c.logger.Debug("initial connection state",
+		zap.String("address", c.address),
+		zap.String("state", state.String()))
+
+	for {
+		// 等待状态变化
+		c.mu.RLock()
+		if !c.conn.WaitForStateChange(c.ctx, state) {
+			c.mu.RUnlock()
+			// context已取消，退出监控
+			return
+		}
+
+		state = c.conn.GetState()
+		c.mu.RUnlock()
+
+		c.logger.Info("connection state changed",
+			zap.String("address", c.address),
+			zap.String("new_state", state.String()))
+
+		// 如果连接失败，记录警告
+		if state == connectivity.TransientFailure {
+			c.logger.Warn("connection in transient failure state",
+				zap.String("address", c.address))
+		} else if state == connectivity.Shutdown {
+			c.logger.Warn("connection shutdown",
+				zap.String("address", c.address))
+			return
+		}
+	}
 }
 
 // DaemonClientPool Daemon客户端连接池
@@ -311,7 +467,7 @@ func NewDaemonClientPool(logger *zap.Logger) *DaemonClientPool {
 // GetClient 获取或创建客户端
 // nodeID: 节点ID，用于标识连接
 // address: Daemon地址，格式为 "host:port"
-func (p *DaemonClientPool) GetClient(nodeID, address string) (*DaemonClient, error) {
+func (p *DaemonClientPool) GetClient(nodeID, address string) (service.DaemonClient, error) {
 	if nodeID == "" {
 		return nil, fmt.Errorf("%w: nodeID is required", ErrInvalidArgument)
 	}

@@ -16,7 +16,7 @@ import { useClusterOverview } from '../../hooks';
 import MetricCard from '../../components/Metrics/MetricCard';
 import { TopNodesCard, AlertsPanel } from '../../components/Dashboard';
 import { RefreshControl } from '../../components/Metrics';
-import { getUsageColor, getDiskUsageColor, formatBytesToGB } from '../../utils/metricsUtils';
+import { getUsageColor } from '../../utils/metricsUtils';
 import { useMetricsStore } from '../../stores';
 
 export default function Dashboard() {
@@ -170,7 +170,7 @@ export default function Dashboard() {
       </Grid>
 
       {/* Top 节点排名和告警面板 */}
-      <Grid container spacing={2.5} sx={{ mt: 0.5 }}>
+      <Grid container spacing={2.5} sx={{ mt: 3 }}>
         <Grid size={{ xs: 12, lg: 6 }}>
           <TopNodesCard nodes={nodes} loading={isLoading} />
         </Grid>

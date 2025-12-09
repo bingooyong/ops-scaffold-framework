@@ -30,9 +30,9 @@ export default function DiskCard({ nodeId }: DiskCardProps) {
       };
     }
 
-    const usedBytes = values?.used_bytes || 0;
-    const totalBytes = values?.total_bytes || 0;
-    const usage = values?.usage_percent || 0;
+    const usedBytes = (values?.used_bytes as number) || 0;
+    const totalBytes = (values?.total_bytes as number) || 0;
+    const usage = (values?.usage_percent as number) || 0;
 
     // 检查是否有有效数据
     const hasValidData = totalBytes > 0 || usedBytes > 0 || usage > 0;

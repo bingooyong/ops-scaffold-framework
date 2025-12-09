@@ -7,6 +7,7 @@ GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 # 构建参数
 BINARY = daemon
+CTL_BINARY = daemonctl
 BIN_DIR = bin
 PKG = github.com/bingooyong/ops-scaffold-framework/daemon
 LDFLAGS = -X '$(PKG)/internal/version.Version=$(VERSION)' \
@@ -23,10 +24,17 @@ GOMOD = $(GOCMD) mod
 
 all: lint test build
 
-build:
+build: build-daemon build-ctl
+
+build-daemon:
 	@echo "Building $(BINARY)..."
 	@mkdir -p $(BIN_DIR)
 	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/daemon
+
+build-ctl:
+	@echo "Building $(CTL_BINARY)..."
+	@mkdir -p $(BIN_DIR)
+	$(GOBUILD) -o $(BIN_DIR)/$(CTL_BINARY) ./cmd/daemonctl
 
 build-linux:
 	@echo "Building $(BINARY) for Linux..."
@@ -66,9 +74,10 @@ vet:
 proto:
 	@echo "Generating protobuf code..."
 	@which protoc > /dev/null || (echo "protoc not installed" && exit 1)
+	@mkdir -p pkg/proto/manager
 	protoc --go_out=. --go_opt=paths=source_relative \
 	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-	       pkg/proto/daemon.proto
+	       pkg/proto/daemon.proto pkg/proto/manager/manager.proto
 
 deps:
 	@echo "Downloading dependencies..."
@@ -81,8 +90,9 @@ deps-update:
 	$(GOMOD) tidy
 
 install: build
-	@echo "Installing $(BINARY)..."
+	@echo "Installing $(BINARY) and $(CTL_BINARY)..."
 	sudo install -m 755 $(BIN_DIR)/$(BINARY) /usr/local/bin/$(BINARY)
+	sudo install -m 755 $(BIN_DIR)/$(CTL_BINARY) /usr/local/bin/$(CTL_BINARY)
 	sudo mkdir -p /etc/daemon
 	sudo cp configs/daemon.yaml /etc/daemon/ 2>/dev/null || true
 	@echo "Installation complete"
@@ -102,7 +112,9 @@ docker-build:
 
 help:
 	@echo "Available targets:"
-	@echo "  build          - Build the binary"
+	@echo "  build          - Build daemon and daemonctl binaries"
+	@echo "  build-daemon   - Build daemon binary only"
+	@echo "  build-ctl      - Build daemonctl binary only"
 	@echo "  build-linux    - Build binary for Linux"
 	@echo "  clean          - Clean build artifacts"
 	@echo "  test           - Run tests"
@@ -113,7 +125,7 @@ help:
 	@echo "  proto          - Generate protobuf code"
 	@echo "  deps           - Download dependencies"
 	@echo "  deps-update    - Update dependencies"
-	@echo "  install        - Install binary"
-	@echo "  uninstall      - Uninstall binary"
+	@echo "  install        - Install binaries"
+	@echo "  uninstall      - Uninstall binaries"
 	@echo "  run            - Build and run"
 	@echo "  docker-build   - Build Docker image"

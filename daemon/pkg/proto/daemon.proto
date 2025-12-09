@@ -81,21 +81,25 @@ message MetricsResponse {
 // ConfigRequest 配置请求
 message ConfigRequest {
   string node_id = 1;
+  string config_type = 2;         // 配置类型: "daemon" 或 "agent"
 }
 
 // ConfigResponse 配置响应
 message ConfigResponse {
-  bytes config = 1; // JSON格式的配置数据
+  bool success = 1;               // 是否成功
+  string message = 2;             // 响应消息
+  bytes config_data = 3;          // JSON或YAML格式的配置数据
 }
 
 // UpdateRequest 更新请求
 message UpdateRequest {
   string node_id = 1;
-  string component = 2; // "agent" or "daemon"
-  string version = 3;
-  string download_url = 4;
-  string hash = 5;
-  string signature = 6;
+  string component = 2;           // 组件类型: "daemon" 或 "agent"
+  string version = 3;             // 目标版本号
+  string download_url = 4;        // 更新包下载URL
+  string hash = 5;                // 文件哈希(SHA256)
+  string signature = 6;           // 数字签名(用于验证)
+  bytes update_data = 7;          // 更新包数据(可选,用于小文件直接传输)
 }
 
 // UpdateResponse 更新响应
@@ -167,6 +171,8 @@ message AgentState {
   string status = 2;            // 运行状态
   int32 pid = 3;                // 进程ID
   int64 last_heartbeat = 4;     // 最后心跳时间
+  string type = 5;              // Agent类型(filebeat/telegraf/node_exporter等)
+  string version = 6;           // Agent版本号
 }
 
 // SyncAgentStatesRequest 同步Agent状态请求

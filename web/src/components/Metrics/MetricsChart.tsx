@@ -10,10 +10,9 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from 'recharts';
 import { format } from 'date-fns';
-import { Paper, Typography, Box, Skeleton } from '@mui/material';
+import { Paper, Typography, Skeleton } from '@mui/material';
 
 export interface MetricsChartProps {
   data: { timestamp: number; value: number }[];
@@ -25,9 +24,23 @@ export interface MetricsChartProps {
 }
 
 /**
+ * 自定义 Tooltip 组件的 Props
+ */
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{
+    value?: number;
+    payload?: {
+      unit?: string;
+    };
+  }>;
+  label?: number | string;
+}
+
+/**
  * 自定义 Tooltip 组件
  */
-function CustomTooltip({ active, payload, label }: any) {
+function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (active && payload && payload.length) {
     const timestamp = label as number;
     const value = payload[0].value as number;

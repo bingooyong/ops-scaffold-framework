@@ -740,7 +740,7 @@ func TestGetResourceHistory_LargeHistory(t *testing.T) {
 	registry := multiManager.GetRegistry()
 
 	agentID := "test-agent"
-	info, err := registry.Register(
+	_, err = registry.Register(
 		agentID,
 		TypeCustom,
 		"Test Agent",

@@ -14,13 +14,14 @@ import (
 
 // HeartbeatReceiver 心跳接收器
 type HeartbeatReceiver struct {
-	socketPath string
-	listener   net.Listener
+	socketPath    string
+	listener      net.Listener
 	healthChecker *HealthChecker
-	logger     *zap.Logger
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	multiManager  *MultiAgentManager // 多Agent管理器引用(用于更新metadata)
+	logger        *zap.Logger
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
 }
 
 // NewHeartbeatReceiver 创建心跳接收器
@@ -33,6 +34,11 @@ func NewHeartbeatReceiver(socketPath string, healthChecker *HealthChecker, logge
 		ctx:           ctx,
 		cancel:        cancel,
 	}
+}
+
+// SetMultiAgentManager 设置多Agent管理器(用于更新metadata)
+func (r *HeartbeatReceiver) SetMultiAgentManager(multiManager *MultiAgentManager) {
+	r.multiManager = multiManager
 }
 
 // Start 启动心跳接收
@@ -116,6 +122,33 @@ func (r *HeartbeatReceiver) handleConnection(conn net.Conn) {
 		}
 
 		// 将心跳传递给健康检查器
-		r.healthChecker.ReceiveHeartbeat(&hb)
+		if r.healthChecker != nil {
+			r.healthChecker.ReceiveHeartbeat(&hb)
+		}
+
+		// 如果有多Agent管理器，也更新metadata
+		// 注意：Unix Socket心跳可能不包含agent_id，需要通过PID查找对应的Agent
+		if r.multiManager != nil {
+			// 通过PID查找对应的Agent实例
+			instances := r.multiManager.ListAgents()
+			for _, instance := range instances {
+				if instance.GetInfo().GetPID() == int(hb.PID) {
+					agentID := instance.GetInfo().ID
+					// 更新metadata中的心跳信息
+					if err := r.multiManager.UpdateHeartbeat(agentID, hb.Timestamp, hb.CPU, hb.Memory); err != nil {
+						r.logger.Warn("failed to update heartbeat in metadata",
+							zap.String("agent_id", agentID),
+							zap.Int("pid", int(hb.PID)),
+							zap.Error(err))
+					} else {
+						r.logger.Debug("updated heartbeat in metadata",
+							zap.String("agent_id", agentID),
+							zap.Int("pid", int(hb.PID)),
+							zap.Time("timestamp", hb.Timestamp))
+					}
+					break
+				}
+			}
+		}
 	}
 }

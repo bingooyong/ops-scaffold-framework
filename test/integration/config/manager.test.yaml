@@ -1,0 +1,56 @@
+# Manager 测试环境配置文件
+
+# HTTP服务配置
+server:
+  host: 127.0.0.1
+  port: 8080
+  mode: debug  # 测试环境使用debug模式
+  read_timeout: 30s
+  write_timeout: 30s
+
+# 数据库配置（测试环境）
+database:
+  driver: mysql
+  dsn: "root:rootpassword@tcp(127.0.0.1:3306)/ops_manager_dev?charset=utf8mb4&parseTime=True&loc=Local"
+  max_idle_conns: 5
+  max_open_conns: 20
+  conn_max_lifetime: 30m
+  log_level: info
+
+# Redis配置（测试环境）
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 5
+
+# gRPC服务配置
+grpc:
+  host: 0.0.0.0
+  port: 9090
+  tls:
+    enabled: false  # 测试环境关闭TLS
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+
+# JWT配置
+jwt:
+  secret: "test-secret-key-do-not-use-in-production"
+  expire_time: 24h
+  issuer: "ops-manager-test"
+
+# 日志配置
+log:
+  level: debug  # 测试环境使用debug级别
+  output_path: test/integration/logs/manager.log
+  max_size: 50
+  max_backups: 3
+  max_age: 7
+  compress: false
+
+# 监控指标配置
+metrics:
+  retention_days: 1  # 测试环境保留 1 天
+  cleanup_schedule: "0 2 * * *"  # 每天凌晨 2 点执行

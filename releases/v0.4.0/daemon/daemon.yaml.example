@@ -1,0 +1,188 @@
+# Daemon 多 Agent 管理配置文件示例
+# 此文件展示如何配置多个第三方 Agent（filebeat、telegraf、node_exporter）
+
+# 基础配置
+daemon:
+  id: ""  # 留空则自动生成
+  log_level: info  # debug, info, warn, error
+  log_file: /var/log/daemon/daemon.log
+  pid_file: /var/run/daemon.pid
+  work_dir: /var/lib/daemon
+
+# Manager连接配置
+manager:
+  address: "manager.example.com:9090"
+  tls:
+    cert_file: /etc/daemon/certs/client.crt
+    key_file: /etc/daemon/certs/client.key
+    ca_file: /etc/daemon/certs/ca.crt
+  heartbeat_interval: 60s
+  reconnect_interval: 10s
+  timeout: 30s
+
+# 多 Agent 管理配置（新设计）
+# agents 是一个数组，每个元素表示一个要管理的 Agent 实例
+agents:
+  # ============================================
+  # 示例 1: Filebeat 日志采集 Agent
+  # ============================================
+  - id: filebeat-logs                    # Agent 唯一标识符（必需）
+    type: filebeat                       # Agent 类型（必需）：filebeat、telegraf、node_exporter、custom
+    name: "Filebeat Log Collector"       # Agent 显示名称（可选，默认使用 type）
+    binary_path: /usr/bin/filebeat       # Agent 可执行文件绝对路径（必需）
+    config_file: /etc/filebeat/filebeat.yml  # Agent 配置文件路径（必需，filebeat 使用 YAML 配置）
+    work_dir: /var/lib/daemon/agents/filebeat-logs  # 工作目录（可选，默认：{daemon.work_dir}/agents/{id}）
+    socket_path: ""                      # Unix Socket 路径（可选，filebeat 不使用）
+    enabled: true                         # 是否启用此 Agent（可选，默认 true）
+    # Agent 特定的启动参数（可选，用于覆盖默认启动参数）
+    # filebeat 默认启动参数: ["-c", "{config_file}", "-path.home", "{work_dir}"]
+    args:
+      - "-c"
+      - "/etc/filebeat/filebeat.yml"
+      - "-path.home"
+      - "/var/lib/daemon/agents/filebeat-logs"
+    # 健康检查配置（可选，继承全局默认值）
+    health_check:
+      interval: 30s                      # 健康检查间隔
+      heartbeat_timeout: 90s             # 心跳超时（如果 Agent 支持心跳）
+      cpu_threshold: 50.0                # CPU 使用率阈值（%）
+      memory_threshold: 524288000        # 内存使用阈值（字节，500MB）
+      threshold_duration: 60s            # 阈值持续时间
+    # 重启策略配置（可选，继承全局默认值）
+    restart:
+      max_retries: 10                    # 最大重启次数
+      backoff_base: 10s                  # 退避基础时间
+      backoff_max: 60s                   # 最大退避时间
+      policy: always                     # 重启策略：always（总是重启）、never（不重启）、on-failure（失败时重启）
+
+  # ============================================
+  # 示例 2: Telegraf 指标采集 Agent
+  # ============================================
+  - id: telegraf-metrics                 # Agent 唯一标识符
+    type: telegraf                       # Agent 类型
+    name: "Telegraf Metrics Collector"   # 显示名称
+    binary_path: /usr/bin/telegraf       # 可执行文件路径
+    config_file: /etc/telegraf/telegraf.conf  # 配置文件路径（telegraf 使用 TOML 格式）
+    work_dir: /var/lib/daemon/agents/telegraf-metrics  # 工作目录
+    socket_path: ""                      # Socket 路径（telegraf 不使用）
+    enabled: true                        # 启用
+    # telegraf 默认启动参数: ["-config", "{config_file}"]
+    args:
+      - "-config"
+      - "/etc/telegraf/telegraf.conf"
+    # 健康检查配置
+    health_check:
+      interval: 30s
+      heartbeat_timeout: 90s
+      cpu_threshold: 40.0                 # Telegraf 通常资源占用较低
+      memory_threshold: 262144000        # 250MB
+      threshold_duration: 60s
+    # 重启策略
+    restart:
+      max_retries: 10
+      backoff_base: 10s
+      backoff_max: 60s
+      policy: always
+
+  # ============================================
+  # 示例 3: Node Exporter 指标采集 Agent
+  # ============================================
+  - id: node-exporter                    # Agent 唯一标识符
+    type: node_exporter                  # Agent 类型
+    name: "Node Exporter Metrics"        # 显示名称
+    binary_path: /usr/local/bin/node_exporter  # 可执行文件路径
+    config_file: ""                      # Node Exporter 不使用配置文件，使用命令行参数
+    work_dir: /var/lib/daemon/agents/node-exporter  # 工作目录
+    socket_path: ""                      # Socket 路径
+    enabled: true                        # 启用
+    # node_exporter 使用命令行参数而非配置文件
+    # 默认启动参数: ["--web.listen-address=:9100", "--path.procfs=/proc", "--path.sysfs=/sys"]
+    args:
+      - "--web.listen-address=:9100"      # 监听地址
+      - "--path.procfs=/proc"            # procfs 路径
+      - "--path.sysfs=/sys"              # sysfs 路径
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/)"  # 排除的挂载点
+    # 健康检查配置
+    health_check:
+      interval: 30s
+      # node_exporter 通过 HTTP 端点提供健康检查，不使用心跳
+      heartbeat_timeout: 0s              # 不使用心跳检查
+      cpu_threshold: 30.0                # Node Exporter 资源占用很低
+      memory_threshold: 104857600        # 100MB
+      threshold_duration: 60s
+      # HTTP 健康检查端点（可选，如果 Agent 提供 HTTP 健康检查）
+      http_endpoint: "http://localhost:9100/metrics"  # 健康检查 HTTP 端点
+    # 重启策略
+    restart:
+      max_retries: 10
+      backoff_base: 10s
+      backoff_max: 60s
+      policy: always
+
+  # ============================================
+  # 示例 4: 自定义 Agent（可选示例）
+  # ============================================
+  # - id: custom-agent
+  #   type: custom                        # 自定义类型
+  #   name: "Custom Application Agent"
+  #   binary_path: /usr/local/bin/custom-agent
+  #   config_file: /etc/custom-agent/config.json
+  #   work_dir: /var/lib/daemon/agents/custom-agent
+  #   socket_path: /var/run/custom-agent.sock  # 如果使用 Socket 通信
+  #   enabled: true
+  #   args:
+  #     - "--config"
+  #     - "/etc/custom-agent/config.json"
+  #   health_check:
+  #     interval: 30s
+  #     heartbeat_timeout: 90s
+  #     cpu_threshold: 50.0
+  #     memory_threshold: 524288000
+  #     threshold_duration: 60s
+  #   restart:
+  #     max_retries: 10
+  #     backoff_base: 10s
+  #     backoff_max: 60s
+  #     policy: always
+
+# 全局 Agent 默认配置（可选）
+# 如果 agents 数组中某个 Agent 未指定某些配置项，将使用以下默认值
+agent_defaults:
+  # 全局健康检查默认配置
+  health_check:
+    interval: 30s
+    heartbeat_timeout: 90s
+    cpu_threshold: 50.0
+    memory_threshold: 524288000
+    threshold_duration: 60s
+  # 全局重启策略默认配置
+  restart:
+    max_retries: 10
+    backoff_base: 10s
+    backoff_max: 60s
+    policy: always  # always、never、on-failure
+
+# 采集器配置（Daemon 自身的资源采集）
+collectors:
+  cpu:
+    enabled: true
+    interval: 60s
+  memory:
+    enabled: true
+    interval: 60s
+  disk:
+    enabled: true
+    interval: 60s
+    mount_points: []  # 空则采集所有挂载点
+  network:
+    enabled: true
+    interval: 60s
+    interfaces: []  # 空则采集所有网卡
+
+# 更新配置
+update:
+  download_dir: /var/lib/daemon/downloads
+  backup_dir: /var/lib/daemon/backups
+  max_backups: 5
+  verify_timeout: 300s
+  public_key_file: /etc/daemon/keys/update.pub

@@ -34,8 +34,9 @@ export default function Login() {
       setError('');
       await login(data);
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || '登录失败，请重试');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : '登录失败，请重试';
+      setError(errorMessage);
     }
   };
 

@@ -22,12 +22,16 @@ type Config struct {
 
 // DaemonConfig Daemon基础配置
 type DaemonConfig struct {
-	ID       string `mapstructure:"id"`
-	LogLevel string `mapstructure:"log_level"`
-	LogFile  string `mapstructure:"log_file"`
-	PIDFile  string `mapstructure:"pid_file"`
-	WorkDir  string `mapstructure:"work_dir"`
-	GRPCPort int    `mapstructure:"grpc_port"` // gRPC服务器端口，默认9091
+	ID           string `mapstructure:"id"`
+	LogLevel     string `mapstructure:"log_level"`
+	LogFile      string `mapstructure:"log_file"`
+	PIDFile      string `mapstructure:"pid_file"`
+	WorkDir      string `mapstructure:"work_dir"`
+	GRPCPort     int    `mapstructure:"grpc_port"`     // gRPC服务器端口，默认9091
+	HTTPPort     int    `mapstructure:"http_port"`     // HTTP服务器端口（用于接收Agent心跳），默认8084
+	PprofPort    string `mapstructure:"pprof_port"`    // pprof性能分析端口，默认不启用（空字符串或0）
+	PprofAddress string `mapstructure:"pprof_address"` // pprof监听地址，默认127.0.0.1
+	MaxProcs     int    `mapstructure:"max_procs"`     // GOMAXPROCS，0表示使用默认值（所有CPU核心）
 }
 
 // ManagerConfig Manager连接配置
@@ -186,114 +190,15 @@ func Load(configPath string) (*Config, error) {
 	return config, nil
 }
 
-// setDefaults 设置默认值
+// setDefaults 设置默认值（已重构到 defaults.go）
+// 保留此函数以保持向后兼容，实际实现在 defaults.go 中
 func setDefaults(config *Config) {
-	// Daemon默认值
-	if config.Daemon.LogLevel == "" {
-		config.Daemon.LogLevel = "info"
-	}
-	if config.Daemon.LogFile == "" {
-		config.Daemon.LogFile = "/var/log/daemon/daemon.log"
-	}
-	if config.Daemon.PIDFile == "" {
-		config.Daemon.PIDFile = "/var/run/daemon.pid"
-	}
-	if config.Daemon.WorkDir == "" {
-		config.Daemon.WorkDir = "/var/lib/daemon"
-	}
-
-	// Manager默认值
-	if config.Manager.HeartbeatInterval == 0 {
-		config.Manager.HeartbeatInterval = 60 * time.Second
-	}
-	if config.Manager.ReconnectInterval == 0 {
-		config.Manager.ReconnectInterval = 10 * time.Second
-	}
-	if config.Manager.Timeout == 0 {
-		config.Manager.Timeout = 30 * time.Second
-	}
-
-	// Agent健康检查默认值
-	if config.Agent.HealthCheck.Interval == 0 {
-		config.Agent.HealthCheck.Interval = 30 * time.Second
-	}
-	if config.Agent.HealthCheck.HeartbeatTimeout == 0 {
-		config.Agent.HealthCheck.HeartbeatTimeout = 90 * time.Second
-	}
-	if config.Agent.HealthCheck.CPUThreshold == 0 {
-		config.Agent.HealthCheck.CPUThreshold = 50.0
-	}
-	if config.Agent.HealthCheck.MemoryThreshold == 0 {
-		config.Agent.HealthCheck.MemoryThreshold = 524288000 // 500MB
-	}
-	if config.Agent.HealthCheck.ThresholdDuration == 0 {
-		config.Agent.HealthCheck.ThresholdDuration = 60 * time.Second
-	}
-
-	// Agent重启默认值（旧格式）
-	if config.Agent.Restart.MaxRetries == 0 {
-		config.Agent.Restart.MaxRetries = 10
-	}
-	if config.Agent.Restart.BackoffBase == 0 {
-		config.Agent.Restart.BackoffBase = 10 * time.Second
-	}
-	if config.Agent.Restart.BackoffMax == 0 {
-		config.Agent.Restart.BackoffMax = 60 * time.Second
-	}
-	if config.Agent.Restart.Policy == "" {
-		config.Agent.Restart.Policy = "always"
-	}
-
-	// Agent默认值（新格式）
-	if config.AgentDefaults.HealthCheck.Interval == 0 {
-		config.AgentDefaults.HealthCheck.Interval = 30 * time.Second
-	}
-	if config.AgentDefaults.HealthCheck.HeartbeatTimeout == 0 {
-		config.AgentDefaults.HealthCheck.HeartbeatTimeout = 90 * time.Second
-	}
-	if config.AgentDefaults.HealthCheck.CPUThreshold == 0 {
-		config.AgentDefaults.HealthCheck.CPUThreshold = 50.0
-	}
-	if config.AgentDefaults.HealthCheck.MemoryThreshold == 0 {
-		config.AgentDefaults.HealthCheck.MemoryThreshold = 524288000 // 500MB
-	}
-	if config.AgentDefaults.HealthCheck.ThresholdDuration == 0 {
-		config.AgentDefaults.HealthCheck.ThresholdDuration = 60 * time.Second
-	}
-	if config.AgentDefaults.Restart.MaxRetries == 0 {
-		config.AgentDefaults.Restart.MaxRetries = 10
-	}
-	if config.AgentDefaults.Restart.BackoffBase == 0 {
-		config.AgentDefaults.Restart.BackoffBase = 10 * time.Second
-	}
-	if config.AgentDefaults.Restart.BackoffMax == 0 {
-		config.AgentDefaults.Restart.BackoffMax = 60 * time.Second
-	}
-	if config.AgentDefaults.Restart.Policy == "" {
-		config.AgentDefaults.Restart.Policy = "always"
-	}
-
-	// 采集器默认值
-	if config.Collectors.CPU.Interval == 0 {
-		config.Collectors.CPU.Interval = 60 * time.Second
-	}
-	if config.Collectors.Memory.Interval == 0 {
-		config.Collectors.Memory.Interval = 60 * time.Second
-	}
-	if config.Collectors.Disk.Interval == 0 {
-		config.Collectors.Disk.Interval = 60 * time.Second
-	}
-	if config.Collectors.Network.Interval == 0 {
-		config.Collectors.Network.Interval = 60 * time.Second
-	}
-
-	// 更新默认值
-	if config.Update.MaxBackups == 0 {
-		config.Update.MaxBackups = 5
-	}
-	if config.Update.VerifyTimeout == 0 {
-		config.Update.VerifyTimeout = 300 * time.Second
-	}
+	setDaemonDefaults(&config.Daemon)
+	setManagerDefaults(&config.Manager)
+	setAgentDefaults(&config.Agent)
+	setAgentDefaultsConfig(&config.AgentDefaults)
+	setCollectorDefaults(&config.Collectors)
+	setUpdateDefaults(&config.Update)
 }
 
 // validate 验证配置

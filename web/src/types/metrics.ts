@@ -3,6 +3,14 @@
  */
 
 /**
+ * 指标数据点值
+ */
+export interface MetricValues {
+  usage_percent?: number;
+  [key: string]: unknown;
+}
+
+/**
  * 指标数据
  */
 export interface MetricData {
@@ -10,7 +18,7 @@ export interface MetricData {
   node_id: string;
   type: 'cpu' | 'memory' | 'disk' | 'network';
   timestamp: string;
-  values: Record<string, any>;
+  values: MetricValues;
 }
 
 /**

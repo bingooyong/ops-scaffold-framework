@@ -2,7 +2,7 @@
  * 通用指标卡片组件
  */
 
-import { ReactNode, memo } from 'react';
+import { type ReactNode, memo } from 'react';
 import {
   Card,
   CardContent,
@@ -38,8 +38,8 @@ function MetricCard({
 }: MetricCardProps) {
   if (loading) {
     return (
-      <Card elevation={2}>
-        <CardContent>
+      <Card elevation={2} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <CardContent sx={{ flex: 1 }}>
           <Skeleton variant="text" width="60%" height={32} />
           <Skeleton variant="text" width="40%" height={48} sx={{ mt: 1 }} />
           <Skeleton variant="rectangular" height={8} sx={{ mt: 2, borderRadius: 1 }} />
@@ -50,8 +50,8 @@ function MetricCard({
 
   if (error) {
     return (
-      <Card elevation={2}>
-        <CardContent>
+      <Card elevation={2} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <CardContent sx={{ flex: 1 }}>
           <Alert severity="error">{error}</Alert>
         </CardContent>
       </Card>
@@ -59,8 +59,8 @@ function MetricCard({
   }
 
   return (
-    <Card elevation={2}>
-      <CardContent>
+    <Card elevation={2} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         {/* 标题和图标 */}
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Typography variant="h6" component="div">
@@ -100,13 +100,13 @@ function MetricCard({
         )}
 
         {/* 附加信息 */}
-        {extraInfo && (
-          <Box sx={{ mt: 1 }}>
+        <Box sx={{ mt: 'auto', pt: extraInfo ? 1 : 0 }}>
+          {extraInfo && (
             <Typography variant="caption" color="text.secondary">
               {extraInfo}
             </Typography>
-          </Box>
-        )}
+          )}
+        </Box>
       </CardContent>
     </Card>
   );

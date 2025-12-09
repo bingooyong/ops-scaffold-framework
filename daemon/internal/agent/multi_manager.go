@@ -30,6 +30,9 @@ type MultiAgentManager struct {
 	// metadataStore 元数据存储接口
 	metadataStore MetadataStore
 
+	// asyncWriter 异步元数据写入器(避免IO阻塞)
+	asyncWriter *AsyncMetadataWriter
+
 	// stateChangeCallback Agent状态变化回调函数(可选)
 	stateChangeCallback AgentStateChangeCallback
 
@@ -45,10 +48,14 @@ func NewMultiAgentManager(workDir string, logger *zap.Logger) (*MultiAgentManage
 		return nil, fmt.Errorf("failed to create metadata store: %w", err)
 	}
 
+	// 创建异步元数据写入器
+	asyncWriter := NewAsyncMetadataWriter(metadataStore, logger)
+
 	return &MultiAgentManager{
 		registry:      NewAgentRegistry(),
 		instances:     make(map[string]*AgentInstance),
 		metadataStore: metadataStore,
+		asyncWriter:   asyncWriter,
 		logger:        logger,
 	}, nil
 }
@@ -144,56 +151,82 @@ func (mam *MultiAgentManager) StartAgent(ctx context.Context, id string) error {
 		return err
 	}
 
-	// Agent启动成功后,创建或更新元数据
+	// Agent启动成功后,异步创建或更新元数据(避免IO阻塞)
 	info := instance.GetInfo()
 	now := time.Now()
 
-	// 尝试获取现有元数据
-	metadata, err := mam.metadataStore.GetMetadata(id)
-	if err != nil {
-		// 如果元数据不存在,创建新记录
-		if err == os.ErrNotExist {
-			metadata = &AgentMetadata{
-				ID:            id,
-				Type:          string(info.Type),
-				Status:        "running",
-				StartTime:     now,
-				RestartCount:  0,
-				ResourceUsage: *NewResourceUsageHistory(1440),
-			}
-			if err := mam.metadataStore.SaveMetadata(id, metadata); err != nil {
-				mam.logger.Warn("failed to save metadata after agent start",
+	// 异步保存元数据
+	go func() {
+		// 尝试获取现有元数据
+		metadata, err := mam.metadataStore.GetMetadata(id)
+		if err != nil {
+			// 如果元数据不存在,创建新记录
+			if err == os.ErrNotExist {
+				metadata = &AgentMetadata{
+					ID:            id,
+					Type:          string(info.Type),
+					Status:        "running",
+					StartTime:     now,
+					RestartCount:  0,
+					ResourceUsage: *NewResourceUsageHistory(1440),
+				}
+				mam.asyncWriter.SaveMetadata(id, metadata)
+			} else {
+				mam.logger.Warn("failed to get metadata after agent start",
 					zap.String("agent_id", id),
 					zap.Error(err))
 			}
 		} else {
-			mam.logger.Warn("failed to get metadata after agent start",
-				zap.String("agent_id", id),
-				zap.Error(err))
+			// 更新现有元数据
+			metadata.Status = "running"
+			metadata.StartTime = now
+			mam.asyncWriter.SaveMetadata(id, metadata)
 		}
-	} else {
-		// 更新现有元数据
-		metadata.Status = "running"
-		metadata.StartTime = now
-		if err := mam.metadataStore.SaveMetadata(id, metadata); err != nil {
-			mam.logger.Warn("failed to update metadata after agent start",
-				zap.String("agent_id", id),
-				zap.Error(err))
-		}
-	}
+	}()
 
-	// 通知状态变化回调
-	if mam.stateChangeCallback != nil {
-		info := instance.GetInfo()
-		var lastHeartbeat time.Time
-		metadata, err := mam.metadataStore.GetMetadata(id)
-		if err == nil && metadata != nil {
-			lastHeartbeat = metadata.LastHeartbeat
-		}
-		mam.stateChangeCallback(id, info.GetStatus(), info.GetPID(), lastHeartbeat)
-	}
+	// 异步通知状态变化回调
+	mam.notifyStateChange(id, instance)
 
 	return nil
+}
+
+// notifyStateChange 异步通知状态变化回调
+func (mam *MultiAgentManager) notifyStateChange(agentID string, instance *AgentInstance) {
+	if mam.stateChangeCallback == nil {
+		return
+	}
+
+	info := instance.GetInfo()
+
+	// 使用 goroutine 异步调用回调,避免阻塞 gRPC 响应
+	// 在goroutine内部获取元数据，避免阻塞主流程
+	go func() {
+		var lastHeartbeat time.Time
+		// 使用超时避免永久阻塞
+		type metadataResult struct {
+			metadata *AgentMetadata
+			err      error
+		}
+		metadataChan := make(chan metadataResult, 1)
+
+		go func() {
+			md, err := mam.metadataStore.GetMetadata(agentID)
+			metadataChan <- metadataResult{metadata: md, err: err}
+		}()
+
+		select {
+		case result := <-metadataChan:
+			if result.err == nil && result.metadata != nil {
+				lastHeartbeat = result.metadata.LastHeartbeat
+			}
+		case <-time.After(100 * time.Millisecond):
+			// 超时后使用零值，避免阻塞
+			mam.logger.Debug("metadata read timeout in notifyStateChange",
+				zap.String("agent_id", agentID))
+		}
+
+		mam.stateChangeCallback(agentID, info.GetStatus(), info.GetPID(), lastHeartbeat)
+	}()
 }
 
 // StopAgent 停止指定的Agent
@@ -208,70 +241,78 @@ func (mam *MultiAgentManager) StopAgent(ctx context.Context, id string, graceful
 		return err
 	}
 
-	// Agent停止后,更新元数据
+	// Agent停止后,更新元数据和通知回调
 	updates := &AgentMetadata{
 		Status: "stopped",
 	}
-	if err := mam.metadataStore.UpdateMetadata(id, updates); err != nil {
-		mam.logger.Warn("failed to update metadata after agent stop",
-			zap.String("agent_id", id),
-			zap.Error(err))
-	}
-
-	// 通知状态变化回调
-	if mam.stateChangeCallback != nil {
-		info := instance.GetInfo()
-		var lastHeartbeat time.Time
-		metadata, err := mam.metadataStore.GetMetadata(id)
-		if err == nil && metadata != nil {
-			lastHeartbeat = metadata.LastHeartbeat
-		}
-		mam.stateChangeCallback(id, info.GetStatus(), info.GetPID(), lastHeartbeat)
-	}
+	mam.updateMetadataAndNotify(id, instance, updates)
 
 	return nil
 }
 
 // RestartAgent 重启指定的Agent
-func (mam *MultiAgentManager) RestartAgent(ctx context.Context, id string) error {
+// skipBackoff: 如果为true，跳过回退等待时间（用于手动重启）
+func (mam *MultiAgentManager) RestartAgent(ctx context.Context, id string, skipBackoff bool) error {
 	instance := mam.GetAgent(id)
 	if instance == nil {
 		return &AgentNotFoundError{ID: id}
 	}
 
-	err := instance.Restart(ctx)
+	err := instance.Restart(ctx, skipBackoff)
 	if err != nil {
 		return err
 	}
 
-	// Agent重启后,更新元数据
+	// Agent重启后,更新元数据和通知回调
 	info := instance.GetInfo()
-	now := time.Now()
-	restartCount := info.GetRestartCount()
-
 	updates := &AgentMetadata{
 		Status:       "running",
-		StartTime:    now,
-		RestartCount: restartCount,
+		StartTime:    time.Now(),
+		RestartCount: info.GetRestartCount(),
 	}
-	if err := mam.metadataStore.UpdateMetadata(id, updates); err != nil {
-		mam.logger.Warn("failed to update metadata after agent restart",
-			zap.String("agent_id", id),
-			zap.Error(err))
-	}
-
-	// 通知状态变化回调
-	if mam.stateChangeCallback != nil {
-		info := instance.GetInfo()
-		var lastHeartbeat time.Time
-		metadata, err := mam.metadataStore.GetMetadata(id)
-		if err == nil && metadata != nil {
-			lastHeartbeat = metadata.LastHeartbeat
-		}
-		mam.stateChangeCallback(id, info.GetStatus(), info.GetPID(), lastHeartbeat)
-	}
+	mam.updateMetadataAndNotify(id, instance, updates)
 
 	return nil
+}
+
+// updateMetadataAndNotify 更新元数据并异步通知状态变化回调
+// 提取公共逻辑，消除重复代码
+func (mam *MultiAgentManager) updateMetadataAndNotify(agentID string, instance *AgentInstance, updates *AgentMetadata) {
+	// 异步更新元数据(避免IO阻塞)
+	mam.asyncWriter.UpdateMetadata(agentID, updates)
+
+	// 异步通知状态变化回调
+	mam.notifyStateChange(agentID, instance)
+}
+
+// UpdateAgentStatusWhenProcessExits 当进程退出时更新Agent状态并触发状态同步
+// 用于健康检查器检测到进程退出时调用
+func (mam *MultiAgentManager) UpdateAgentStatusWhenProcessExits(agentID string) {
+	instance := mam.GetAgent(agentID)
+	if instance == nil {
+		return
+	}
+
+	info := instance.GetInfo()
+	currentStatus := info.GetStatus()
+	if currentStatus == StatusStopped {
+		// 状态已经是stopped，不需要更新
+		return
+	}
+
+	mam.logger.Info("updating agent status to stopped due to process exit",
+		zap.String("agent_id", agentID),
+		zap.String("previous_status", string(currentStatus)))
+
+	// 更新AgentInfo状态
+	info.SetStatus(StatusStopped)
+	info.SetPID(0)
+
+	// 更新元数据并触发状态变化通知
+	updates := &AgentMetadata{
+		Status: "stopped",
+	}
+	mam.updateMetadataAndNotify(agentID, instance, updates)
 }
 
 // StartAll 启动所有已注册的Agent
@@ -368,7 +409,7 @@ func (mam *MultiAgentManager) RestartAll(ctx context.Context) map[string]error {
 		wg.Add(1)
 		go func(agentID string, inst *AgentInstance) {
 			defer wg.Done()
-			err := inst.Restart(ctx)
+			err := inst.Restart(ctx, false) // 自动重启，使用回退时间
 			mu.Lock()
 			results[agentID] = err
 			mu.Unlock()
@@ -525,4 +566,11 @@ func (mam *MultiAgentManager) UpdateHeartbeat(agentID string, timestamp time.Tim
 // GetAgentMetadata 获取指定Agent的元数据
 func (mam *MultiAgentManager) GetAgentMetadata(agentID string) (*AgentMetadata, error) {
 	return mam.metadataStore.GetMetadata(agentID)
+}
+
+// Close 关闭MultiAgentManager，停止异步写入器
+func (mam *MultiAgentManager) Close() {
+	if mam.asyncWriter != nil {
+		mam.asyncWriter.Stop()
+	}
 }

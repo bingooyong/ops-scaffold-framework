@@ -1,3 +1,6 @@
+//go:build !e2e && !grpc_test
+// +build !e2e,!grpc_test
+
 package comm
 
 import (
@@ -9,33 +12,52 @@ import (
 	"time"
 
 	"github.com/bingooyong/ops-scaffold-framework/daemon/internal/config"
+	managerpb "github.com/bingooyong/ops-scaffold-framework/daemon/pkg/proto/manager"
 	"github.com/bingooyong/ops-scaffold-framework/daemon/pkg/types"
-	managerpb "github.com/bingooyong/ops-scaffold-framework/manager/pkg/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 )
 
 // GRPCClient gRPC客户端
+// 使用 daemon 自己的 proto 定义，避免依赖 manager 模块
+// 该客户端为长连接设计, 支持后台心跳/指标上报与断线自动重连
 type GRPCClient struct {
 	conn   *grpc.ClientConn
 	client managerpb.ManagerServiceClient
 	config *config.ManagerConfig
 	nodeID string
 	logger *zap.Logger
+
+	// 为了支持后台 loop 与自动重连
+	reconnectInterval time.Duration
 }
 
 // NewGRPCClient 创建gRPC客户端
 func NewGRPCClient(cfg *config.ManagerConfig, logger *zap.Logger) *GRPCClient {
 	return &GRPCClient{
-		config: cfg,
-		logger: logger,
+		config:            cfg,
+		logger:            logger,
+		reconnectInterval: 5 * time.Second,
 	}
 }
 
-// Connect 连接到Manager
+// Connect 连接到Manager(建立或重新建立连接)
 func (c *GRPCClient) Connect(ctx context.Context) error {
+	// 如果已有连接且健康, 直接返回
+	if c.conn != nil {
+		st := c.conn.GetState()
+		if st == connectivity.Ready {
+			return nil
+		}
+
+		// 断开旧连接,准备重连
+		_ = c.conn.Close()
+		c.conn = nil
+	}
+
 	// 加载TLS证书
 	var opts []grpc.DialOption
 
@@ -68,11 +90,11 @@ func (c *GRPCClient) Connect(ctx context.Context) error {
 		opts = append(opts, grpc.WithInsecure())
 	}
 
-	// 添加keepalive参数
+	// 添加keepalive参数(调整为30秒避免too_many_pings错误)
 	opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{
-		Time:                10 * time.Second,
-		Timeout:             3 * time.Second,
-		PermitWithoutStream: true,
+		Time:                30 * time.Second, // keepalive ping间隔,与服务端MinTime(20秒)匹配
+		Timeout:             10 * time.Second, // keepalive超时时间
+		PermitWithoutStream: true,             // 允许无流时发送ping
 	}))
 
 	// 建立连接
@@ -143,7 +165,7 @@ func (c *GRPCClient) Heartbeat(ctx context.Context) error {
 		return fmt.Errorf("node not registered")
 	}
 
-	if c.client == nil {
+	if c.client == nil || c.conn == nil {
 		return fmt.Errorf("gRPC client not connected")
 	}
 
@@ -176,7 +198,7 @@ func (c *GRPCClient) ReportMetrics(ctx context.Context, metrics map[string]*type
 		return fmt.Errorf("node not registered")
 	}
 
-	if c.client == nil {
+	if c.client == nil || c.conn == nil {
 		return fmt.Errorf("gRPC client not connected")
 	}
 
@@ -245,4 +267,13 @@ func (c *GRPCClient) ReportMetrics(ctx context.Context, metrics map[string]*type
 // GetNodeID 获取节点ID
 func (c *GRPCClient) GetNodeID() string {
 	return c.nodeID
+}
+
+// IsConnected 检查连接状态
+func (c *GRPCClient) IsConnected() bool {
+	if c.conn == nil {
+		return false
+	}
+	st := c.conn.GetState()
+	return st == connectivity.Ready
 }

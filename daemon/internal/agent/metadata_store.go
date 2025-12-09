@@ -223,11 +223,8 @@ func (f *FileMetadataStore) SaveMetadata(agentID string, metadata *AgentMetadata
 	return nil
 }
 
-// GetMetadata 获取元数据
-func (f *FileMetadataStore) GetMetadata(agentID string) (*AgentMetadata, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
+// getMetadataUnlocked 读取元数据的内部方法(不加锁,供已持有锁的方法调用)
+func (f *FileMetadataStore) getMetadataUnlocked(agentID string) (*AgentMetadata, error) {
 	metadataPath := f.getMetadataPath(agentID)
 
 	// 读取JSON文件
@@ -264,6 +261,14 @@ func (f *FileMetadataStore) GetMetadata(agentID string) (*AgentMetadata, error) 
 	return &metadata, nil
 }
 
+// GetMetadata 获取元数据
+func (f *FileMetadataStore) GetMetadata(agentID string) (*AgentMetadata, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	return f.getMetadataUnlocked(agentID)
+}
+
 // ListAllMetadata 列举所有元数据
 func (f *FileMetadataStore) ListAllMetadata() ([]*AgentMetadata, error) {
 	f.mu.RLock()
@@ -295,8 +300,8 @@ func (f *FileMetadataStore) ListAllMetadata() ([]*AgentMetadata, error) {
 		// 提取agentID(去掉.json后缀)
 		agentID := entry.Name()[:len(entry.Name())-5]
 
-		// 读取并解析元数据
-		metadata, err := f.GetMetadata(agentID)
+		// 读取并解析元数据(使用不加锁的内部方法,因为已经持有锁)
+		metadata, err := f.getMetadataUnlocked(agentID)
 		if err != nil {
 			// 忽略解析失败的文件,记录WARNING日志
 			f.logger.Warn("failed to parse metadata file",
@@ -317,12 +322,15 @@ func (f *FileMetadataStore) UpdateMetadata(agentID string, updates *AgentMetadat
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// 读取当前元数据
-	current, err := f.GetMetadata(agentID)
+	// 读取当前元数据(使用不加锁的内部方法,因为已经持有锁)
+	current, err := f.getMetadataUnlocked(agentID)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// 如果不存在,创建新记录
-			return f.SaveMetadata(agentID, updates)
+			// 如果不存在,创建新记录(注意:这里需要先释放锁再调用SaveMetadata)
+			f.mu.Unlock()
+			result := f.SaveMetadata(agentID, updates)
+			f.mu.Lock() // 重新获取锁以保证defer正常工作
+			return result
 		}
 		return fmt.Errorf("failed to get current metadata: %w", err)
 	}

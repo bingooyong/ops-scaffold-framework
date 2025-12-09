@@ -211,23 +211,40 @@ func fixConstraintError(db *gorm.DB, err error, log *zap.Logger) (bool, error) {
 
 // AutoMigrate 自动迁移数据库表结构
 func AutoMigrate(db *gorm.DB, log *zap.Logger) error {
+	// 定义所有需要迁移的模型
+	models := []interface{}{
+		&model.User{},
+		&model.Node{},
+		&model.Metrics{},
+		&model.AuditLog{},
+		&model.Task{},
+		&model.Version{},
+		&model.Agent{},
+	}
+
+	// 逐个迁移每个模型，这样一个模型的错误不会影响其他模型
+	for _, m := range models {
+		if err := migrateModel(db, m, log); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// migrateModel 迁移单个模型，处理可能的约束错误
+func migrateModel(db *gorm.DB, model interface{}, log *zap.Logger) error {
 	maxRetries := 2
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		// 执行自动迁移
-		err := db.AutoMigrate(
-			&model.User{},
-			&model.Node{},
-			&model.Metrics{},
-			&model.AuditLog{},
-			&model.Task{},
-			&model.Version{},
-			&model.Agent{},
-		)
+		err := db.AutoMigrate(model)
 
 		// 迁移成功
 		if err == nil {
 			if attempt > 0 && log != nil {
-				log.Info("Migration succeeded after retry", zap.Int("attempt", attempt+1))
+				log.Info("Migration succeeded after retry",
+					zap.String("model", fmt.Sprintf("%T", model)),
+					zap.Int("attempt", attempt+1))
 			}
 			return nil
 		}
@@ -238,7 +255,8 @@ func AutoMigrate(db *gorm.DB, log *zap.Logger) error {
 		// 如果修复函数返回 nil 且不需要重试，说明错误可以安全忽略
 		if !shouldRetry && fixErr == nil {
 			if log != nil {
-				log.Info("Migration error safely ignored (constraint does not exist)")
+				log.Info("Migration constraint error safely ignored",
+					zap.String("model", fmt.Sprintf("%T", model)))
 			}
 			return nil
 		}
@@ -246,20 +264,22 @@ func AutoMigrate(db *gorm.DB, log *zap.Logger) error {
 		// 如果需要重试，继续循环
 		if shouldRetry {
 			if log != nil {
-				log.Info("Retrying migration after constraint cleanup", zap.Int("attempt", attempt+1))
+				log.Info("Retrying migration after constraint cleanup",
+					zap.String("model", fmt.Sprintf("%T", model)),
+					zap.Int("attempt", attempt+1))
 			}
 			continue
 		}
 
 		// 其他错误，返回
 		if fixErr != nil {
-			return fixErr
+			return fmt.Errorf("failed to migrate %T: %w", model, fixErr)
 		}
-		return err
+		return fmt.Errorf("failed to migrate %T: %w", model, err)
 	}
 
 	// 如果重试多次仍然失败
-	return fmt.Errorf("migration failed after %d attempts", maxRetries)
+	return fmt.Errorf("migration failed for %T after %d attempts", model, maxRetries)
 }
 
 // Close 关闭数据库连接

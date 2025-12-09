@@ -1,5 +1,5 @@
-//go:build !grpc_test
-// +build !grpc_test
+//go:build !grpc_test && !e2e
+// +build !grpc_test,!e2e
 
 package grpc
 
@@ -13,7 +13,7 @@ import (
 
 	"github.com/bingooyong/ops-scaffold-framework/daemon/internal/agent"
 	"github.com/bingooyong/ops-scaffold-framework/daemon/internal/config"
-	daemonpb "github.com/bingooyong/ops-scaffold-framework/manager/pkg/proto/daemon"
+	"github.com/bingooyong/ops-scaffold-framework/daemon/pkg/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -21,9 +21,10 @@ import (
 )
 
 // ManagerClient Manager gRPC客户端(用于调用Manager的DaemonService)
+// 使用 daemon 自己的 proto 定义，避免依赖 manager 模块
 type ManagerClient struct {
 	conn   *grpc.ClientConn
-	client daemonpb.DaemonServiceClient
+	client proto.DaemonServiceClient
 	config *config.ManagerConfig
 	logger *zap.Logger
 }
@@ -71,11 +72,39 @@ func (c *ManagerClient) Connect(ctx context.Context) error {
 	}
 
 	// 添加keepalive参数
+	// 注意：Time必须大于Manager服务端的MinTime(20s)，否则会触发too_many_pings错误
 	opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{
-		Time:                10 * time.Second,
-		Timeout:             3 * time.Second,
+		Time:                30 * time.Second, // 30s > 服务端MinTime(20s)
+		Timeout:             10 * time.Second,
 		PermitWithoutStream: true,
 	}))
+
+	// 添加消息大小限制和窗口大小配置
+	opts = append(opts,
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(10*1024*1024), // 10MB
+			grpc.MaxCallSendMsgSize(10*1024*1024), // 10MB
+		),
+		grpc.WithInitialWindowSize(1<<20),     // 1MB
+		grpc.WithInitialConnWindowSize(1<<20), // 1MB
+		grpc.WithUnaryInterceptor(UnaryClientInterceptor(c.logger)),
+	)
+
+	// 添加重试策略
+	retryPolicy := `{
+		"methodConfig": [{
+			"name": [{"service": "proto.DaemonService"}],
+			"waitForReady": true,
+			"retryPolicy": {
+				"MaxAttempts": 3,
+				"InitialBackoff": "0.1s",
+				"MaxBackoff": "1s",
+				"BackoffMultiplier": 2.0,
+				"RetryableStatusCodes": ["UNAVAILABLE", "DEADLINE_EXCEEDED"]
+			}
+		}]
+	}`
+	opts = append(opts, grpc.WithDefaultServiceConfig(retryPolicy))
 
 	// 建立连接
 	conn, err := grpc.DialContext(ctx, c.config.Address, opts...)
@@ -84,7 +113,7 @@ func (c *ManagerClient) Connect(ctx context.Context) error {
 	}
 
 	c.conn = conn
-	c.client = daemonpb.NewDaemonServiceClient(conn)
+	c.client = proto.NewDaemonServiceClient(conn)
 	c.logger.Info("connected to manager daemon service", zap.String("address", c.config.Address))
 
 	return nil
@@ -109,13 +138,16 @@ func (c *ManagerClient) SyncAgentStates(ctx context.Context, nodeID string, stat
 		zap.Int("count", len(states)))
 
 	// 转换AgentState为protobuf AgentState
-	var protoStates []*daemonpb.AgentState
+	// 使用 daemon 自己的 proto 定义，与 manager 的 proto 定义兼容
+	var protoStates []*proto.AgentState
 	for _, state := range states {
-		protoState := &daemonpb.AgentState{
+		protoState := &proto.AgentState{
 			AgentId:       state.AgentID,
 			Status:        string(state.Status),
 			Pid:           int32(state.PID),
 			LastHeartbeat: 0,
+			Type:          state.Type,
+			Version:       state.Version,
 		}
 
 		// 转换LastHeartbeat时间戳
@@ -127,7 +159,7 @@ func (c *ManagerClient) SyncAgentStates(ctx context.Context, nodeID string, stat
 	}
 
 	// 构建同步请求
-	req := &daemonpb.SyncAgentStatesRequest{
+	req := &proto.SyncAgentStatesRequest{
 		NodeId: nodeID,
 		States: protoStates,
 	}

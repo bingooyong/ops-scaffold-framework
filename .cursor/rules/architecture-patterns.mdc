@@ -41,36 +41,45 @@ description: Architecture patterns, design principles, and system design guideli
 - JWT authentication for HTTP API
 - mTLS for gRPC communication
 
-### Daemon (Guardian Process)
+### Daemon (Multi-Agent Management)
 
 **Responsibilities**:
 - System resource collection (CPU, memory, disk, network)
-- Agent process lifecycle management
+- **Multi-agent lifecycle management** (start, stop, restart, health check)
+- Agent registry and discovery
 - Version update execution
 - Status reporting to Manager
 - Local log management
 
 **Key Design Points**:
-- Modular architecture (Collector, AgentMgr, Updater, Communication)
+- **Multi-Agent Architecture**: AgentRegistry + MultiAgentManager + AgentInstance
 - Independent process (not Manager subprocess)
-- Agent runs as independent process (not Daemon subprocess)
+- Each agent runs as independent process (not Daemon subprocess)
 - Resource collection interval: 60s (configurable 10-300s)
-- Agent health check: 30s interval
-- Graceful shutdown (does not stop Agent)
+- Per-agent health check: 30s interval (configurable)
+- Graceful shutdown (does not stop agents)
+- Supports multiple agent types: filebeat, telegraf, node_exporter, custom
 
-### Agent (Execution Process)
+**Agent Types Supported**:
+1. **Filebeat**: Log collection agent (YAML config, `-c` flag)
+2. **Telegraf**: Metrics collection agent (TOML config, `-config` flag)
+3. **Node Exporter**: Prometheus metrics exporter (command-line args, HTTP health check)
+4. **Custom**: User-defined agents with flexible configuration
+
+### Agent (Third-party Agents)
 
 **Responsibilities**:
-- Task execution (scripts, files, services)
-- HTTP/HTTPS API service
-- Heartbeat reporting to Daemon
-- Task queue and concurrency control
+- Task execution (scripts, files, services) - if applicable
+- HTTP/HTTPS API service - if applicable
+- Heartbeat reporting to Daemon - if supported
+- Specific data collection or processing (logs, metrics, etc.)
 
 **Key Design Points**:
 - Independent process (not Daemon subprocess)
-- HTTP API with request signature authentication
-- Worker pool for concurrent task execution
-- Plugin system support (Go plugins)
+- Each agent type has specific startup arguments and config format
+- HTTP API with request signature authentication (if supported)
+- Worker pool for concurrent task execution (if applicable)
+- Plugin system support (Go plugins) - planned
 
 ## Communication Protocols
 
@@ -82,23 +91,25 @@ description: Architecture patterns, design principles, and system design guideli
 - **Key Interfaces**:
   - `Register()` - Node registration
   - `Heartbeat()` - Heartbeat reporting
-  - `ReportMetrics()` - Metrics reporting
+  - `ReportMetrics()` - Metrics reporting (system + agents)
+  - `SyncAgents()` - Agent list synchronization (NEW)
   - `PushUpdate()` - Version update push
 
-### Manager/Daemon ↔ Agent
+### Manager ↔ Third-party Agents
 
 - **Protocol**: HTTP/HTTPS RESTful API
-- **Authentication**: HMAC-SHA256 request signature + IP whitelist
+- **Authentication**: HMAC-SHA256 request signature + IP whitelist (if supported)
 - **Key Endpoints**:
   - `GET /api/v1/health` - Health check
-  - `POST /api/v1/task/execute` - Execute task
-  - `GET /api/v1/task/{id}/status` - Task status
+  - `POST /api/v1/task/execute` - Execute task (if supported)
+  - `GET /api/v1/task/{id}/status` - Task status (if supported)
 
-### Daemon ↔ Agent (Local)
+### Daemon ↔ Third-party Agents (Local)
 
-- **Protocol**: Unix Domain Socket (Linux) / Named Pipe (Windows)
-- **Format**: JSON-RPC 2.0
-- **Messages**: heartbeat, stop, status
+- **Protocol**: Unix Domain Socket (Linux) / Named Pipe (Windows) - if supported
+- **Format**: JSON-RPC 2.0 - if supported
+- **Messages**: heartbeat, stop, status - if supported
+- **Note**: Many third-party agents (filebeat, telegraf, node_exporter) do not use socket communication
 
 ## Security Design
 
@@ -126,11 +137,57 @@ Update packages must pass:
 
 ### Critical Principle
 
-**Agent must run as independent process, not as Daemon subprocess**
+**Third-party agents must run as independent processes, not as Daemon subprocess**
 
-- Daemon exit does not affect Agent
+- Daemon exit does not affect running agents
 - Agent exceptions trigger Daemon auto-restart
-- Supports backoff strategy for restarts
+- Supports exponential backoff strategy for restarts
+- Each agent has isolated configuration, work directory, and logs
+
+### Multi-Agent Configuration
+
+**Configuration Structure**:
+```yaml
+# daemon.yaml
+agents:
+  - id: filebeat-logs
+    type: filebeat
+    binary_path: /usr/bin/filebeat
+    config_file: /etc/filebeat/filebeat.yml
+    work_dir: /var/lib/daemon/agents/filebeat-logs
+    args: ["-c", "/etc/filebeat/filebeat.yml"]
+    health_check:
+      interval: 30s
+      cpu_threshold: 50.0
+      memory_threshold: 524288000
+    restart:
+      max_retries: 10
+      policy: always
+  
+  - id: telegraf-metrics
+    type: telegraf
+    binary_path: /usr/bin/telegraf
+    config_file: /etc/telegraf/telegraf.conf
+    args: ["-config", "/etc/telegraf/telegraf.conf"]
+  
+  - id: node-exporter
+    type: node_exporter
+    binary_path: /usr/local/bin/node_exporter
+    args: ["--web.listen-address=:9100"]
+    health_check:
+      http_endpoint: "http://localhost:9100/metrics"
+
+agent_defaults:
+  health_check:
+    interval: 30s
+    cpu_threshold: 50.0
+    memory_threshold: 524288000
+  restart:
+    max_retries: 10
+    backoff_base: 10s
+    backoff_max: 60s
+    policy: always
+```
 
 ### Restart Strategy
 

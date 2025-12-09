@@ -19,7 +19,7 @@ import {
 } from '@mui/material';
 import { Notifications as NotificationsIcon } from '@mui/icons-material';
 import type { NodeMetrics } from '../../types';
-import { checkNodeAlerts, type Alert as AlertType } from '../../utils/alertRules';
+import { checkNodeAlerts } from '../../utils/alertRules';
 
 interface AlertsPanelProps {
   nodes: NodeMetrics[];
@@ -59,7 +59,7 @@ export default function AlertsPanel({ nodes, loading = false }: AlertsPanelProps
   const hasMore = activeAlerts.length > 10;
 
   return (
-    <Card elevation={2}>
+    <Card elevation={2} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <CardHeader
         title="告警信息"
         action={
@@ -68,7 +68,7 @@ export default function AlertsPanel({ nodes, loading = false }: AlertsPanelProps
           </Badge>
         }
       />
-      <CardContent>
+      <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 200 }}>
         {loading ? (
           // Loading 状态：显示 Skeleton 占位符
           <List>
@@ -83,17 +83,21 @@ export default function AlertsPanel({ nodes, loading = false }: AlertsPanelProps
           </List>
         ) : activeAlerts.length === 0 ? (
           // 无告警状态
-          <Alert severity="success">所有节点运行正常</Alert>
+          <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Alert severity="success" sx={{ width: '100%' }}>
+              所有节点运行正常
+            </Alert>
+          </Box>
         ) : (
           // 告警列表
           <List>
             {displayedAlerts.map((alert, index) => (
               <Box key={`${alert.node_id}-${alert.metric_type}-${index}`}>
                 <ListItem
-                  button
                   onClick={() => navigate(`/nodes/${alert.node_id}`)}
                   sx={{
                     p: 0,
+                    cursor: 'pointer',
                     '&:hover': {
                       backgroundColor: 'action.hover',
                     },

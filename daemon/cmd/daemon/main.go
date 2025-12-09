@@ -8,6 +8,7 @@ import (
 	"github.com/bingooyong/ops-scaffold-framework/daemon/internal/config"
 	"github.com/bingooyong/ops-scaffold-framework/daemon/internal/daemon"
 	"github.com/bingooyong/ops-scaffold-framework/daemon/internal/logger"
+	"go.uber.org/zap"
 )
 
 var (
@@ -40,20 +41,24 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer logger.Sync()
+	defer func() {
+		_ = logger.Sync() // 忽略日志同步错误，程序退出时无法处理
+	}()
 
 	logger.Info("starting daemon")
 
 	// 创建Daemon实例
 	d, err := daemon.New(cfg, logger.Logger)
 	if err != nil {
-		logger.Error("failed to create daemon")
+		fmt.Fprintf(os.Stderr, "failed to create daemon: %v\n", err)
+		logger.Error("failed to create daemon", zap.Error(err))
 		os.Exit(1)
 	}
 
 	// 启动Daemon
 	if err := d.Start(); err != nil {
-		logger.Error("failed to start daemon")
+		fmt.Fprintf(os.Stderr, "failed to start daemon: %v\n", err)
+		logger.Error("failed to start daemon", zap.Error(err))
 		os.Exit(1)
 	}
 

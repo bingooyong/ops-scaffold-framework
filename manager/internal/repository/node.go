@@ -166,10 +166,11 @@ func (r *nodeRepository) UpdateStatus(ctx context.Context, nodeID string, status
 
 // UpdateHeartbeat 更新心跳时间
 func (r *nodeRepository) UpdateHeartbeat(ctx context.Context, nodeID string) error {
+	now := time.Now()
 	return r.db.WithContext(ctx).
 		Model(&model.Node{}).
 		Where("node_id = ?", nodeID).
-		Update("last_heartbeat_at", gorm.Expr("NOW()")).
+		Update("last_seen_at", now).
 		Error
 }
 
@@ -192,7 +193,7 @@ func (r *nodeRepository) GetOfflineNodes(ctx context.Context, duration time.Dura
 	cutoffTime := time.Now().Add(-duration)
 
 	err := r.db.WithContext(ctx).
-		Where("last_heartbeat_at < ? AND status != ?", cutoffTime, "offline").
+		Where("last_seen_at < ? AND status != ?", cutoffTime, "offline").
 		Find(&nodes).Error
 
 	return nodes, err

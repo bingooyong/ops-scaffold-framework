@@ -36,25 +36,61 @@ func NewServer(
 
 // ListAgents 列举所有Agent
 func (s *Server) ListAgents(ctx context.Context, req *proto.ListAgentsRequest) (*proto.ListAgentsResponse, error) {
+	s.logger.Info("=== ListAgents called ===")
+
 	// 获取所有Agent实例
 	instances := s.multiAgentManager.ListAgents()
+	s.logger.Info("got agent instances", zap.Int("count", len(instances)))
 
 	// 转换为protobuf消息
 	agents := make([]*proto.AgentInfo, 0, len(instances))
 	for _, instance := range instances {
 		info := instance.GetInfo()
+		
+		// 记录当前状态，用于调试
+		currentStatus := info.GetStatus()
+		currentPID := info.GetPID()
+		s.logger.Debug("converting agent info to proto",
+			zap.String("agent_id", info.ID),
+			zap.String("status", string(currentStatus)),
+			zap.Int("pid", currentPID))
 
-		// 获取元数据
-		metadata, err := s.multiAgentManager.GetAgentMetadata(info.ID)
-		if err != nil {
-			// 如果元数据不存在，使用默认值
-			s.logger.Debug("metadata not found for agent",
-				zap.String("agent_id", info.ID),
-				zap.Error(err))
+		// 尝试获取元数据，但使用超时避免阻塞
+		// 使用goroutine + select来避免永久阻塞
+		type metadataResult struct {
+			metadata *agent.AgentMetadata
+			err      error
+		}
+		metadataChan := make(chan metadataResult, 1)
+
+		go func() {
+			md, err := s.multiAgentManager.GetAgentMetadata(info.ID)
+			metadataChan <- metadataResult{metadata: md, err: err}
+		}()
+
+		var metadata *agent.AgentMetadata
+		select {
+		case result := <-metadataChan:
+			if result.err != nil {
+				s.logger.Debug("metadata not found for agent",
+					zap.String("agent_id", info.ID),
+					zap.Error(result.err))
+				metadata = nil
+			} else {
+				metadata = result.metadata
+			}
+		case <-time.After(100 * time.Millisecond):
+			// 超时后使用nil metadata，避免阻塞
+			s.logger.Warn("metadata read timeout for agent",
+				zap.String("agent_id", info.ID))
 			metadata = nil
 		}
 
 		agentInfo := convertAgentInfoToProto(info, metadata)
+		s.logger.Debug("converted agent info to proto",
+			zap.String("agent_id", agentInfo.Id),
+			zap.String("status", agentInfo.Status),
+			zap.Int32("pid", agentInfo.Pid))
 		agents = append(agents, agentInfo)
 	}
 
@@ -68,6 +104,12 @@ func (s *Server) ListAgents(ctx context.Context, req *proto.ListAgentsRequest) (
 
 // OperateAgent 操作Agent(启动/停止/重启)
 func (s *Server) OperateAgent(ctx context.Context, req *proto.AgentOperationRequest) (*proto.AgentOperationResponse, error) {
+	// 记录请求开始时间和参数
+	start := time.Now()
+	s.logger.Info("received OperateAgent request",
+		zap.String("agent_id", req.AgentId),
+		zap.String("operation", req.Operation))
+
 	// 验证请求参数
 	if req.AgentId == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
@@ -93,19 +135,26 @@ func (s *Server) OperateAgent(ctx context.Context, req *proto.AgentOperationRequ
 	var err error
 	switch req.Operation {
 	case "start":
+		s.logger.Debug("starting agent", zap.String("agent_id", req.AgentId))
 		err = s.multiAgentManager.StartAgent(ctx, req.AgentId)
 	case "stop":
+		s.logger.Debug("stopping agent", zap.String("agent_id", req.AgentId))
 		err = s.multiAgentManager.StopAgent(ctx, req.AgentId, true)
 	case "restart":
-		err = s.multiAgentManager.RestartAgent(ctx, req.AgentId)
+		s.logger.Debug("restarting agent", zap.String("agent_id", req.AgentId))
+		err = s.multiAgentManager.RestartAgent(ctx, req.AgentId, true) // 手动重启，跳过回退时间
 	default:
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid operation: %s", req.Operation))
 	}
+
+	// 记录操作耗时
+	duration := time.Since(start)
 
 	if err != nil {
 		s.logger.Error("failed to operate agent",
 			zap.String("agent_id", req.AgentId),
 			zap.String("operation", req.Operation),
+			zap.Duration("duration", duration),
 			zap.Error(err))
 		return &proto.AgentOperationResponse{
 			Success:      false,
@@ -116,6 +165,7 @@ func (s *Server) OperateAgent(ctx context.Context, req *proto.AgentOperationRequ
 	s.logger.Info("agent operation completed",
 		zap.String("agent_id", req.AgentId),
 		zap.String("operation", req.Operation),
+		zap.Duration("duration", duration),
 		zap.Bool("success", true))
 
 	return &proto.AgentOperationResponse{
@@ -212,10 +262,19 @@ func (s *Server) SyncAgentStates(ctx context.Context, req *proto.SyncAgentStates
 
 // convertAgentInfoToProto 将AgentInfo和AgentMetadata转换为protobuf AgentInfo消息
 func convertAgentInfoToProto(info *agent.AgentInfo, metadata *agent.AgentMetadata) *proto.AgentInfo {
+	// 获取状态，如果为空则使用默认值 "stopped"
+	status := info.GetStatus()
+	statusStr := string(status)
+	
+	// 如果状态为空字符串，使用默认值 "stopped"
+	if statusStr == "" {
+		statusStr = string(agent.StatusStopped)
+	}
+
 	protoInfo := &proto.AgentInfo{
 		Id:            info.ID,
 		Type:          string(info.Type),
-		Status:        string(info.GetStatus()),
+		Status:        statusStr,
 		Pid:           int32(info.GetPID()),
 		Version:       "",
 		StartTime:     0,

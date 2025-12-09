@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package manager;
+
+option go_package = "github.com/bingooyong/ops-scaffold-framework/daemon/pkg/proto/manager";
+
+// ManagerService Manager服务定义
+// 注意：此定义与 manager 模块的 ManagerService 定义兼容，用于 daemon 作为客户端调用 manager
+service ManagerService {
+  // RegisterNode 节点注册
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+
+  // Heartbeat 心跳上报
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // ReportMetrics 指标上报
+  rpc ReportMetrics(ReportMetricsRequest) returns (ReportMetricsResponse);
+}
+
+// RegisterNodeRequest 节点注册请求
+message RegisterNodeRequest {
+  string node_id = 1;
+  string hostname = 2;
+  string ip = 3;
+  string os = 4;
+  string arch = 5;
+  map<string, string> labels = 6;
+  string daemon_version = 7;
+  string agent_version = 8;
+}
+
+// RegisterNodeResponse 节点注册响应
+message RegisterNodeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// HeartbeatRequest 心跳请求
+message HeartbeatRequest {
+  string node_id = 1;
+  int64 timestamp = 2;
+}
+
+// HeartbeatResponse 心跳响应
+message HeartbeatResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// MetricData 指标数据
+message MetricData {
+  string type = 1;  // cpu, memory, disk, network
+  int64 timestamp = 2;
+  map<string, double> values = 3;
+}
+
+// ReportMetricsRequest 指标上报请求
+message ReportMetricsRequest {
+  string node_id = 1;
+  repeated MetricData metrics = 2;
+}
+
+// ReportMetricsResponse 指标上报响应
+message ReportMetricsResponse {
+  bool success = 1;
+  string message = 2;
+}

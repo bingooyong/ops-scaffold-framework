@@ -13,17 +13,21 @@ export interface User {
   last_login_at?: string;
 }
 
-export enum UserRole {
-  Admin = 'admin',
-  User = 'user',
-  Guest = 'guest',
-}
+export const UserRole = {
+  Admin: 'admin',
+  User: 'user',
+  Guest: 'guest',
+} as const;
 
-export enum UserStatus {
-  Active = 'active',
-  Disabled = 'disabled',
-  Locked = 'locked',
-}
+export type UserRole = typeof UserRole[keyof typeof UserRole];
+
+export const UserStatus = {
+  Active: 'active',
+  Disabled: 'disabled',
+  Locked: 'locked',
+} as const;
+
+export type UserStatus = typeof UserStatus[keyof typeof UserStatus];
 
 export interface LoginRequest {
   username: string;

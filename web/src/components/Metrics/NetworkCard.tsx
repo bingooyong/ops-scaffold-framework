@@ -15,22 +15,25 @@ interface NetworkCardProps {
 export default function NetworkCard({ nodeId }: NetworkCardProps) {
   const { data, isLoading, error } = useLatestMetrics(nodeId);
 
-  const networkData = data?.data?.network;
-  const values = networkData?.values;
-
   // 使用 useMemo 缓存计算结果
-  const { totalMB, extraInfo, hasData } = useMemo(() => {
-    if (!isLoading && !error && !networkData) {
+  const { displayValue, displayUnit, extraInfo, hasData } = useMemo(() => {
+    // 类型安全地获取网络数据
+    const networkData = data?.data?.network;
+    const values = networkData?.values;
+
+    if (isLoading || error || !networkData) {
       return {
-        totalMB: 0,
+        displayValue: '-',
+        displayUnit: undefined,
         extraInfo: undefined,
         hasData: false,
       };
     }
 
-    const rxBytes = values?.rx_bytes || 0;
-    const txBytes = values?.tx_bytes || 0;
+    const rxBytes = (values?.rx_bytes as number) || 0;
+    const txBytes = (values?.tx_bytes as number) || 0;
     const totalBytes = rxBytes + txBytes;
+    const intervalSeconds = values?.interval_seconds as number | undefined;
 
     // 检查是否有有效数据
     const hasValidData = totalBytes > 0 || rxBytes > 0 || txBytes > 0;
@@ -39,14 +42,68 @@ export default function NetworkCard({ nodeId }: NetworkCardProps) {
     const txMB = formatBytesToMB(txBytes);
     const total = formatBytesToMB(totalBytes);
 
+    // 格式化时间间隔
+    let timeRangeText = '';
+    if (intervalSeconds && intervalSeconds > 0) {
+      if (intervalSeconds < 60) {
+        timeRangeText = `${Math.round(intervalSeconds)}秒`;
+      } else if (intervalSeconds < 3600) {
+        timeRangeText = `${Math.round(intervalSeconds / 60)}分钟`;
+      } else {
+        timeRangeText = `${(intervalSeconds / 3600).toFixed(1)}小时`;
+      }
+    }
+
+    // 计算速率（如果知道采集间隔）
+    let rateText = '';
+    if (intervalSeconds && intervalSeconds > 0) {
+      const rxRate = rxBytes / intervalSeconds;
+      const txRate = txBytes / intervalSeconds;
+      const rxRateMB = formatBytesToMB(rxRate);
+      const txRateMB = formatBytesToMB(txRate);
+      rateText = `速率: ${rxRateMB.toFixed(2)} MB/s ↓ / ${txRateMB.toFixed(2)} MB/s ↑`;
+    }
+
+    // 构建额外信息：优先显示速率，然后显示累计值和时间范围
+    // 格式：速率: XXX MB/s ↓ / XXX MB/s ↑ • 接收: XXX MB / 发送: XXX MB [过去XX分钟]
+    let displayValue: string;
+    let displayUnit: string | undefined;
+    const extraInfoParts: string[] = [];
+
+    if (intervalSeconds && intervalSeconds > 0 && rateText) {
+      // 如果有速率信息，优先显示速率作为主值
+      const rxRate = rxBytes / intervalSeconds;
+      const txRate = txBytes / intervalSeconds;
+      const totalRate = rxRate + txRate;
+      const totalRateMB = formatBytesToMB(totalRate);
+      displayValue = totalRateMB.toFixed(2);
+      displayUnit = 'MB/s';
+      extraInfoParts.push(rateText);
+      extraInfoParts.push(`接收: ${rxMB.toFixed(2)} MB • 发送: ${txMB.toFixed(2)} MB`);
+      if (timeRangeText) {
+        extraInfoParts.push(`[过去${timeRangeText}]`);
+      }
+    } else {
+      // 如果没有速率信息，显示累计值
+      displayValue = total.toFixed(2);
+      displayUnit = 'MB';
+      extraInfoParts.push(`接收: ${rxMB.toFixed(2)} MB • 发送: ${txMB.toFixed(2)} MB`);
+      if (timeRangeText) {
+        extraInfoParts.push(`[过去${timeRangeText}]`);
+      }
+    }
+
     return {
       totalMB: total,
-      extraInfo: `接收: ${rxMB} MB • 发送: ${txMB} MB`,
+      displayValue,
+      displayUnit,
+      extraInfo: extraInfoParts.join(' • '),
       hasData: hasValidData,
     };
-  }, [isLoading, error, networkData, values]);
+  }, [isLoading, error, data]);
 
-  if (!isLoading && !error && !networkData) {
+  const networkDataForCheck = data?.data?.network;
+  if (!isLoading && !error && !networkDataForCheck) {
     return (
       <MetricCard
         title="网络流量"
@@ -75,8 +132,8 @@ export default function NetworkCard({ nodeId }: NetworkCardProps) {
   return (
     <MetricCard
       title="网络流量"
-      value={totalMB.toFixed(2)}
-      unit="MB"
+      value={displayValue}
+      unit={displayUnit}
       icon={<NetworkCheckIcon />}
       color={color}
       loading={isLoading}

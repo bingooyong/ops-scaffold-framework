@@ -214,20 +214,37 @@ func (mhc *MultiHealthChecker) checkAgentHealth(agentID string, healthCheckCfg *
 
 			switch status {
 			case types.HealthStatusDead:
+				// 无论是否手动停止，如果进程已退出，都应该更新状态为stopped并触发状态同步
+				mhc.multiAgentManager.UpdateAgentStatusWhenProcessExits(agentID)
+
+				// 检查Agent是否被手动停止，如果是则跳过自动重启
+				instance := mhc.multiAgentManager.GetAgent(agentID)
+				if instance != nil && instance.IsManuallyStopped() {
+					mhc.logger.Debug("agent manually stopped, skipping auto-restart",
+						zap.String("agent_id", agentID))
+					continue
+				}
 				mhc.logger.Warn("agent process not running, restarting",
 					zap.String("agent_id", agentID))
-				if err := mhc.multiAgentManager.RestartAgent(mhc.ctx, agentID); err != nil {
+				if err := mhc.multiAgentManager.RestartAgent(mhc.ctx, agentID, false); err != nil {
 					mhc.logger.Error("failed to restart agent",
 						zap.String("agent_id", agentID),
 						zap.Error(err))
 				}
 
 			case types.HealthStatusNoHeartbeat:
+				// 检查Agent是否被手动停止，如果是则跳过自动重启
+				instance := mhc.multiAgentManager.GetAgent(agentID)
+				if instance != nil && instance.IsManuallyStopped() {
+					mhc.logger.Debug("agent manually stopped, skipping auto-restart",
+						zap.String("agent_id", agentID))
+					continue
+				}
 				lastHB := mhc.getLastHeartbeat(agentID)
 				mhc.logger.Warn("agent heartbeat timeout, restarting",
 					zap.String("agent_id", agentID),
 					zap.Time("last_heartbeat", lastHB))
-				if err := mhc.multiAgentManager.RestartAgent(mhc.ctx, agentID); err != nil {
+				if err := mhc.multiAgentManager.RestartAgent(mhc.ctx, agentID, false); err != nil {
 					mhc.logger.Error("failed to restart agent",
 						zap.String("agent_id", agentID),
 						zap.Error(err))
@@ -243,7 +260,7 @@ func (mhc *MultiHealthChecker) checkAgentHealth(agentID string, healthCheckCfg *
 					mhc.logger.Warn("agent resource over threshold for too long, restarting",
 						zap.String("agent_id", agentID),
 						zap.Duration("duration", time.Since(overThresholdSince)))
-					if err := mhc.multiAgentManager.RestartAgent(mhc.ctx, agentID); err != nil {
+					if err := mhc.multiAgentManager.RestartAgent(mhc.ctx, agentID, false); err != nil {
 						mhc.logger.Error("failed to restart agent",
 							zap.String("agent_id", agentID),
 							zap.Error(err))
@@ -286,12 +303,19 @@ func (mhc *MultiHealthChecker) checkHealth(agentID string, healthCheckCfg *confi
 		return types.HealthStatusDead
 	}
 
-	// 1. 检查进程是否存在
+	// 1. 如果Agent被手动停止，即使进程不存在也不认为是Dead状态
+	// 这样可以避免健康检查器在manuallyStopped设置之前就检查导致的竞态条件
+	if instance.IsManuallyStopped() {
+		// 手动停止的Agent，不进行健康检查，返回Healthy状态（避免自动重启）
+		return types.HealthStatusHealthy
+	}
+
+	// 2. 检查进程是否存在
 	if !instance.IsRunning() {
 		return types.HealthStatusDead
 	}
 
-	// 2. 检查心跳（如果配置了心跳超时）
+	// 3. 检查心跳（如果配置了心跳超时）
 	if healthCheckCfg.HeartbeatTimeout > 0 {
 		lastHB := mhc.getLastHeartbeat(agentID)
 		if !lastHB.IsZero() && time.Since(lastHB) > healthCheckCfg.HeartbeatTimeout {
@@ -299,11 +323,11 @@ func (mhc *MultiHealthChecker) checkHealth(agentID string, healthCheckCfg *confi
 		}
 	}
 
-	// 3. 根据Agent类型选择健康检查策略
+	// 4. 根据Agent类型选择健康检查策略
 	info := instance.GetInfo()
 	status := mhc.checkHealthByType(agentID, info, healthCheckCfg, instance)
 
-	// 4. 更新健康状态中的资源信息
+	// 5. 更新健康状态中的资源信息
 	if status == types.HealthStatusOverThreshold || status == types.HealthStatusHealthy {
 		mhc.updateResourceInfo(agentID, instance)
 	}

@@ -1,0 +1,363 @@
+---
+globs: daemon/internal/agent/*.go
+description: Multi-Agent management architecture design and implementation guidelines for Daemon module
+---
+# Multi-Agent Management Architecture
+
+## Overview
+
+The Daemon module has been redesigned to support managing **multiple third-party agent instances** (filebeat, telegraf, node_exporter, custom agents) instead of a single agent. This architecture enables flexible deployment of various data collection and processing agents on each host.
+
+## Core Components
+
+### 1. AgentRegistry
+
+**File**: `daemon/internal/agent/registry.go`
+
+**Purpose**: Centralized registry for managing multiple agent instances with concurrent-safe operations.
+
+**Key Features**:
+- Thread-safe with `sync.RWMutex`
+- Stores agent metadata indexed by agent ID
+- Supports registration, lookup, listing, and unregistration
+
+**Methods**:
+```go
+func (r *AgentRegistry) Register(id, type, name, binaryPath, configFile, workDir, socketPath) (*AgentInfo, error)
+func (r *AgentRegistry) Get(id string) *AgentInfo
+func (r *AgentRegistry) Unregister(id string) error
+func (r *AgentRegistry) List() []*AgentInfo
+func (r *AgentRegistry) ListByType(agentType AgentType) []*AgentInfo
+func (r *AgentRegistry) Count() int
+func (r *AgentRegistry) Exists(id string) bool
+```
+
+### 2. AgentInfo
+
+**File**: `daemon/internal/agent/registry.go`
+
+**Purpose**: Metadata structure for each agent instance.
+
+**Key Fields**:
+```go
+type AgentInfo struct {
+    ID             string       // Unique identifier (e.g., "filebeat-logs")
+    Type           AgentType    // Agent type (filebeat, telegraf, node_exporter, custom)
+    Name           string       // Display name
+    BinaryPath     string       // Executable file path
+    ConfigFile     string       // Config file path (optional)
+    WorkDir        string       // Working directory
+    SocketPath     string       // Unix socket path (optional)
+    PID            int          // Process ID (0 = not running)
+    Status         AgentStatus  // Current status (stopped, starting, running, etc.)
+    RestartCount   int          // Restart counter
+    LastRestart    time.Time    // Last restart timestamp
+    CreatedAt      time.Time    // Registration timestamp
+    UpdatedAt      time.Time    // Last update timestamp
+    mu             sync.RWMutex // Concurrency lock
+}
+```
+
+**Agent Types**:
+- `TypeFilebeat` - Filebeat log collection agent
+- `TypeTelegraf` - Telegraf metrics collection agent
+- `TypeNodeExporter` - Node Exporter metrics agent
+- `TypeCustom` - Custom user-defined agent
+
+**Agent Status**:
+- `StatusStopped` - Agent is stopped
+- `StatusStarting` - Agent is starting
+- `StatusRunning` - Agent is running
+- `StatusStopping` - Agent is stopping
+- `StatusRestarting` - Agent is restarting
+- `StatusFailed` - Agent failed to start or encountered error
+
+### 3. MultiAgentManager
+
+**File**: `daemon/internal/agent/multi_manager.go`
+
+**Purpose**: Orchestrates lifecycle management of multiple agent instances.
+
+**Key Responsibilities**:
+- Load agents from configuration
+- Start/stop/restart all agents or individual agents
+- Monitor agent health
+- Handle agent failures with restart policies
+
+**Methods**:
+```go
+func (m *MultiAgentManager) StartAll(ctx context.Context) error
+func (m *MultiAgentManager) StopAll(ctx context.Context) error
+func (m *MultiAgentManager) RestartAll(ctx context.Context) error
+func (m *MultiAgentManager) StartAgent(ctx context.Context, agentID string) error
+func (m *MultiAgentManager) StopAgent(ctx context.Context, agentID string) error
+func (m *MultiAgentManager) RestartAgent(ctx context.Context, agentID string) error
+func (m *MultiAgentManager) GetAgentStatus(agentID string) (*AgentInfo, error)
+func (m *MultiAgentManager) ListAgents() []*AgentInfo
+```
+
+### 4. AgentInstance
+
+**File**: `daemon/internal/agent/instance.go`
+
+**Purpose**: Manages single agent process lifecycle (refactored from original `Manager`).
+
+**Key Responsibilities**:
+- Start agent process with type-aware argument generation
+- Stop agent process (graceful and forced)
+- Monitor process state
+- Generate agent-specific startup arguments
+
+**Startup Argument Generation**:
+```go
+// Filebeat: -c <config_file> -path.home <work_dir>
+// Telegraf: -config <config_file>
+// Node Exporter: --web.listen-address=:9100 --path.procfs=/proc --path.sysfs=/sys
+// Custom: user-defined args from config
+```
+
+### 5. Multi-HealthChecker
+
+**File**: `daemon/internal/agent/multi_health_checker.go`
+
+**Purpose**: Monitors health of all registered agents.
+
+**Health Check Types**:
+1. **Process Check**: Verify process is running, check PID
+2. **Resource Check**: Monitor CPU and memory usage
+3. **HTTP Check**: Periodic HTTP endpoint checks (e.g., Node Exporter `/metrics`)
+4. **Heartbeat Check**: Monitor agent heartbeat (if supported)
+
+**Configuration**:
+```yaml
+health_check:
+  interval: 30s                    # Check interval
+  heartbeat_timeout: 90s           # Heartbeat timeout
+  cpu_threshold: 50.0              # CPU usage threshold (%)
+  memory_threshold: 524288000      # Memory threshold (bytes)
+  threshold_duration: 60s          # Duration before triggering action
+  http_endpoint: "http://..."      # HTTP endpoint for health check (optional)
+```
+
+## Configuration Format
+
+### YAML Configuration Structure
+
+**File**: `daemon/configs/daemon.yaml`
+
+**Multi-Agent Configuration**:
+```yaml
+# Multiple agent instances
+agents:
+  - id: filebeat-logs                    # Unique identifier
+    type: filebeat                       # Agent type
+    name: "Filebeat Log Collector"       # Display name
+    binary_path: /usr/bin/filebeat       # Executable path
+    config_file: /etc/filebeat/filebeat.yml
+    work_dir: /var/lib/daemon/agents/filebeat-logs
+    socket_path: ""                      # Optional
+    enabled: true                        # Enable/disable
+    args:                                # Startup arguments (optional, overrides defaults)
+      - "-c"
+      - "/etc/filebeat/filebeat.yml"
+      - "-path.home"
+      - "/var/lib/daemon/agents/filebeat-logs"
+    health_check:
+      interval: 30s
+      cpu_threshold: 50.0
+      memory_threshold: 524288000
+    restart:
+      max_retries: 10
+      backoff_base: 10s
+      backoff_max: 60s
+      policy: always                     # always | never | on-failure
+
+  - id: telegraf-metrics
+    type: telegraf
+    binary_path: /usr/bin/telegraf
+    config_file: /etc/telegraf/telegraf.conf
+    args: ["-config", "/etc/telegraf/telegraf.conf"]
+    # ... health_check and restart config
+
+  - id: node-exporter
+    type: node_exporter
+    binary_path: /usr/local/bin/node_exporter
+    config_file: ""                      # No config file for node_exporter
+    args:
+      - "--web.listen-address=:9100"
+      - "--path.procfs=/proc"
+      - "--path.sysfs=/sys"
+    health_check:
+      http_endpoint: "http://localhost:9100/metrics"
+    # ... restart config
+
+# Global defaults for all agents
+agent_defaults:
+  health_check:
+    interval: 30s
+    heartbeat_timeout: 90s
+    cpu_threshold: 50.0
+    memory_threshold: 524288000
+    threshold_duration: 60s
+  restart:
+    max_retries: 10
+    backoff_base: 10s
+    backoff_max: 60s
+    policy: always
+```
+
+### Configuration Loading
+
+**File**: `daemon/internal/config/config.go`
+
+**Configuration Structures**:
+```go
+type Config struct {
+    Daemon        DaemonConfig       `mapstructure:"daemon"`
+    Manager       ManagerConfig      `mapstructure:"manager"`
+    Agents        []AgentConfig      `mapstructure:"agents"`        // NEW: Array of agents
+    AgentDefaults AgentDefaultsConfig `mapstructure:"agent_defaults"` // NEW: Global defaults
+    Collectors    CollectorsConfig   `mapstructure:"collectors"`
+    Update        UpdateConfig       `mapstructure:"update"`
+}
+
+type AgentConfig struct {
+    ID            string              `mapstructure:"id"`
+    Type          string              `mapstructure:"type"`
+    Name          string              `mapstructure:"name"`
+    BinaryPath    string              `mapstructure:"binary_path"`
+    ConfigFile    string              `mapstructure:"config_file"`
+    WorkDir       string              `mapstructure:"work_dir"`
+    SocketPath    string              `mapstructure:"socket_path"`
+    Enabled       bool                `mapstructure:"enabled"`
+    Args          []string            `mapstructure:"args"`
+    HealthCheck   HealthCheckConfig   `mapstructure:"health_check"`
+    Restart       RestartConfig       `mapstructure:"restart"`
+}
+```
+
+**Config Merging**: Agent-specific config overrides `agent_defaults`.
+
+## Agent Type Compatibility
+
+### Filebeat
+
+- **Config Format**: YAML
+- **Default Args**: `-c <config_file> -path.home <work_dir>`
+- **Work Dir**: Required (for registry file)
+- **Health Check**: Process + Resource monitoring
+- **HTTP Endpoint**: None
+
+### Telegraf
+
+- **Config Format**: TOML
+- **Default Args**: `-config <config_file>`
+- **Work Dir**: Optional
+- **Health Check**: Process + Resource monitoring
+- **HTTP Endpoint**: Optional (if http_listener plugin enabled)
+
+### Node Exporter
+
+- **Config Format**: None (command-line args only)
+- **Default Args**: `--web.listen-address=:9100 --path.procfs=/proc --path.sysfs=/sys`
+- **Work Dir**: Not required
+- **Health Check**: Process + Resource + HTTP endpoint
+- **HTTP Endpoint**: `http://localhost:9100/metrics`
+
+### Custom Agents
+
+- **Config Format**: User-defined
+- **Args**: Specified in YAML config
+- **Work Dir**: User-defined
+- **Health Check**: Configurable (process/resource/HTTP)
+- **HTTP Endpoint**: Optional
+
+## Implementation Tasks
+
+### Refactoring Roadmap
+
+| Task | Description | Status |
+|------|-------------|--------|
+| Task 1.2 | Implement AgentRegistry and AgentInfo | 📋 Pending |
+| Task 1.3 | Refactor Manager to AgentInstance | 📋 Pending |
+| Task 1.4 | Create MultiAgentManager | 📋 Pending |
+| Task 1.5 | Implement Agent configuration isolation | 📋 Pending |
+| Task 1.6 | Update HealthChecker for multi-agent | 📋 Pending |
+| Task 1.7 | Write comprehensive test suite | 📋 Pending |
+
+### Testing Requirements
+
+**Unit Tests**:
+- AgentRegistry operations (register, get, unregister, list)
+- AgentInstance lifecycle (start, stop, restart)
+- Configuration loading and merging
+- Health checker logic
+
+**Integration Tests**:
+- Multi-agent startup and shutdown
+- Agent failure and auto-restart
+- Configuration hot-reload
+- Concurrent agent operations
+
+**Coverage Target**: > 85%
+
+## Best Practices
+
+### Naming Conventions
+
+- **Agent IDs**: Use descriptive IDs with type prefix (e.g., `filebeat-logs`, `telegraf-metrics`)
+- **Work Directories**: Use pattern `{daemon.work_dir}/agents/{agent_id}`
+- **Log Files**: Use pattern `{work_dir}/{agent_id}.log`
+
+### Error Handling
+
+- Use custom error types: `AgentExistsError`, `AgentNotFoundError`, `AgentRunningError`
+- Log all agent lifecycle events with agent ID and type
+- Return descriptive errors for troubleshooting
+
+### Concurrency
+
+- Always use mutex locks when accessing shared state
+- Use `sync.RWMutex` for read-heavy operations (AgentRegistry)
+- Use `sync.Mutex` for write-heavy operations (AgentInfo status updates)
+
+### Process Management
+
+- Each agent MUST run as independent OS process
+- Daemon exit MUST NOT terminate agents
+- Use proper signal handling (SIGTERM for graceful shutdown)
+- Implement exponential backoff for restart failures
+
+## Migration from Single-Agent
+
+### Backward Compatibility
+
+The system supports both old (single agent) and new (multi-agent) configurations:
+
+**Old Format** (deprecated but supported):
+```yaml
+agent:
+  binary_path: /usr/bin/agent
+  config_file: /etc/agent/config.yaml
+  # ...
+```
+
+**New Format** (recommended):
+```yaml
+agents:
+  - id: agent-1
+    type: custom
+    binary_path: /usr/bin/agent
+    # ...
+```
+
+**Migration Strategy**:
+1. If both `agent` and `agents` exist, use `agents` and log warning
+2. If only `agent` exists, automatically convert to `agents` array with ID `default-agent`
+3. Update documentation to encourage migration to new format
+
+## References
+
+- Design Document: [docs/设计文档_04_Daemon多Agent管理架构.md](mdc:docs/设计文档_04_Daemon多Agent管理架构.md)
+- Example Config: `daemon/configs/daemon.multi-agent.example.yaml`
+- Test Agent Characteristics: `test-agent/docs/第三方Agent特征分析.md`

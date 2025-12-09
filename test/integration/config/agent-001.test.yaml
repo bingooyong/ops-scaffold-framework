@@ -1,0 +1,21 @@
+# Agent 测试配置文件 - agent-001
+
+# Agent 基础配置
+agent_id: "agent-001"
+version: "1.0.0"
+
+# 心跳配置
+heartbeat:
+  socket_path: "/tmp/daemon.sock"  # Daemon 心跳接收 Unix Socket 路径
+  interval: 30s                     # 心跳间隔
+
+# HTTP API 配置
+http:
+  port: 8081                   # HTTP 服务监听端口
+  host: "0.0.0.0"             # 监听地址
+
+# 日志配置
+log:
+  level: "debug"              # 测试环境使用debug级别
+  file: ""                     # 留空则输出到 stdout（由启动脚本重定向到日志文件）
+  format: "json"               # 日志格式
