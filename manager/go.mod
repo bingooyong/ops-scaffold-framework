@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/bingooyong/ops-scaffold-framework/daemon v0.0.0-20251207030925-9a3bbde4107c
 	github.com/gin-gonic/gin v1.10.0
-	github.com/golang-jwt/jwt/v5 v5.2.0
+	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.18.2
